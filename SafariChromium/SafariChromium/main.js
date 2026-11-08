@@ -619,12 +619,10 @@ function createWindow({ isPrivate = false, url } = {}) {
     }
   });
 
-  win.webContents.on('did-finish-load', () => {
-    if (w.tabs.length === 0) createTab(w, url || HOME_PAGE);
-    else push(w);
-  });
+  win.webContents.on('did-finish-load', () => push(w));
 
   win.loadFile(path.join(__dirname, 'ui', 'index.html'));
+  createTab(w, url || HOME_PAGE);
   return w;
 }
 
