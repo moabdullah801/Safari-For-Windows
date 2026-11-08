@@ -85,6 +85,35 @@ const historyFile = path.join(app.getPath('userData'), 'history.json');
 let history = [];
 try { history = JSON.parse(fs.readFileSync(historyFile, 'utf8')); } catch (_) { /* first run */ }
 
+const bookmarksFile = path.join(app.getPath('userData'), 'bookmarks.json');
+let bookmarks = [];
+try { bookmarks = JSON.parse(fs.readFileSync(bookmarksFile, 'utf8')); } catch (_) { /* first run */ }
+
+function saveBookmarks() {
+  try {
+    fs.mkdirSync(path.dirname(bookmarksFile), { recursive: true });
+    fs.writeFileSync(bookmarksFile, JSON.stringify(bookmarks, null, 2));
+    return true;
+  } catch (err) {
+    console.warn('Could not save bookmarks:', err && err.message);
+    return false;
+  }
+}
+
+function toggleBookmark(w) {
+  const tab = activeTab(w);
+  if (!tab || !/^https?:\/\//i.test(tab.url)) return;
+  const previous = bookmarks.slice();
+  const index = bookmarks.findIndex((bookmark) => bookmark.url === tab.url);
+  if (index >= 0) bookmarks.splice(index, 1);
+  else bookmarks.unshift({ title: tab.title || tab.url, url: tab.url });
+  if (!saveBookmarks()) {
+    bookmarks = previous;
+    return;
+  }
+  windows.forEach(push);
+}
+
 function recordHistory(url, title) {
   if (history.length && history[history.length - 1].url === url) return;
   history.push({ url, title, time: Date.now() });
@@ -156,7 +185,7 @@ function configureSession(ses) {
 
   // Deny permission prompts (camera, location, notifications...) by default.
   ses.setPermissionRequestHandler((_wc, permission, callback) => {
-    callback(['fullscreen', 'clipboard-sanitized-write'].includes(permission));
+    callback(['fullscreen', 'clipboard-sanitized-write', 'publickey-credentials-get', 'publickey-credentials-create'].includes(permission));
   });
 
   ses.webRequest.onBeforeRequest((details, callback) => {
@@ -291,6 +320,7 @@ function attachTabView(w, tab) {
   tab.view = new WebContentsView({
     webPreferences: {
       session: w.ses,
+      preload: path.join(__dirname, 'login-preload.js'),
       contextIsolation: true,
       sandbox: true,
       javascript: settings.javascriptEnabled,
@@ -304,7 +334,12 @@ function attachTabView(w, tab) {
     if (/^https?:/i.test(target)) createTab(w, target, true);
     return { action: 'deny' };
   });
-  wc.on('page-title-updated', (_e, title) => { tab.title = title; push(w); });
+  wc.on('page-title-updated', (_e, title) => {
+    tab.title = title;
+    const bookmark = bookmarks.find((item) => item.url === tab.url);
+    if (bookmark) { bookmark.title = title; saveBookmarks(); }
+    push(w);
+  });
   wc.on('page-favicon-updated', (_e, icons) => { tab.favicon = icons[0] || ''; push(w); });
   wc.on('did-start-loading', () => { tab.loading = true; push(w); });
   wc.on('did-stop-loading', () => {
@@ -415,6 +450,43 @@ function moveTab(w, tabId, groupId) {
   const tab = w.tabs.find((t) => t.id === tabId);
   if (!tab) return;
   tab.groupId = groupId || null;
+  regroup(w);
+  push(w);
+}
+
+function dropTab(w, sourceId, targetId, groupId) {
+  const source = w.tabs.find((tab) => tab.id === sourceId);
+  const target = w.tabs.find((tab) => tab.id === targetId);
+  if (!source || target === source) return;
+
+  if (target && target !== source) {
+    let destinationGroupId = target.groupId || source.groupId;
+    if (!destinationGroupId) {
+      const group = {
+        id: nextGroupId++,
+        name: `Group ${w.groups.length + 1}`,
+        color: GROUP_COLORS[(nextGroupId - 2) % GROUP_COLORS.length],
+      };
+      w.groups.push(group);
+      destinationGroupId = group.id;
+    }
+    if (source.groupId && target.groupId && source.groupId !== target.groupId) {
+      w.tabs.forEach((tab) => { if (tab.groupId === source.groupId) tab.groupId = destinationGroupId; });
+    }
+    source.groupId = destinationGroupId;
+    target.groupId = destinationGroupId;
+    w.tabs.splice(w.tabs.indexOf(source), 1);
+    w.tabs.splice(w.tabs.indexOf(target) + 1, 0, source);
+  } else {
+    source.groupId = groupId || source.groupId || null;
+    w.tabs.splice(w.tabs.indexOf(source), 1);
+    if (source.groupId) {
+      const lastGroupTab = w.tabs.reduce((last, tab, index) => tab.groupId === source.groupId ? index : last, -1);
+      w.tabs.splice(lastGroupTab + 1, 0, source);
+    } else {
+      w.tabs.push(source);
+    }
+  }
   regroup(w);
   push(w);
 }
@@ -555,6 +627,82 @@ function isVaultEncryptionAvailable() {
   return backend !== 'basic_text' && backend !== 'unknown';
 }
 
+function loginHost(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' && !(parsed.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(parsed.hostname))) return null;
+    return parsed.hostname.toLowerCase().replace(/^www\./, '');
+  } catch (_) {
+    return null;
+  }
+}
+
+function passwordsForTab(tab) {
+  const host = loginHost(tab && tab.url);
+  if (!host) return [];
+  try {
+    return readPasswordVault().filter((entry) => loginHost(entry.url) === host);
+  } catch (err) {
+    console.warn('Could not read password vault:', err && err.message);
+    return [];
+  }
+}
+
+function fillPassword(tab, id) {
+  const entry = passwordsForTab(tab).find((item) => item.id === id);
+  if (!entry || !tab || tab.view.webContents.isDestroyed()) return;
+  const payload = JSON.stringify({ username: entry.username, password: entry.password });
+  const script = `(() => {
+    const saved = ${payload};
+    const visible = (input) => input && !input.disabled && input.getClientRects().length > 0;
+    const user = [...document.querySelectorAll('input[autocomplete="username"], input[type="email"], input[name*="user" i], input[name*="login" i]')].find(visible);
+    const pass = [...document.querySelectorAll('input[type="password"]')].find(visible);
+    const setValue = (input, value) => {
+      if (!input) return;
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+      setter.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+    };
+    setValue(user, saved.username);
+    setValue(pass, saved.password);
+    return !!pass;
+  })()`;
+  tab.view.webContents.executeJavaScript(script, true).catch(() => {});
+}
+
+function passwordMenuTemplate(w, tab) {
+  const matches = passwordsForTab(tab);
+  return [
+    ...(matches.length
+      ? matches.map((entry) => ({
+        label: `${entry.username}${entry.name ? ` (${entry.name})` : ''}`,
+        click: () => fillPassword(tab, entry.id),
+      }))
+      : [{ label: 'No saved passwords for this site', enabled: false }]),
+    { type: 'separator' },
+    { label: 'Manage Passwords...', click: () => openSettings(w) },
+  ];
+}
+
+function showPasswordsMenu(w, x, y) {
+  const tab = activeTab(w);
+  if (!tab) return;
+  Menu.buildFromTemplate(passwordMenuTemplate(w, tab)).popup({
+    window: w.win,
+    x: Math.round(x || 0),
+    y: Math.round(y || 0),
+  });
+}
+
+function showLoginPasswordMenu(w, tab, bounds = {}) {
+  if (!tab || activeTab(w) !== tab || !passwordsForTab(tab).length) return;
+  const [width, height] = w.win.getContentSize();
+  const x = Math.max(0, Math.min(Number(bounds.x) || 0, width - 220));
+  const y = Math.max(CHROME_HEIGHT, Math.min(CHROME_HEIGHT + (Number(bounds.y) || 0), height - 80));
+  Menu.buildFromTemplate(passwordMenuTemplate(w, tab)).popup({ window: w.win, x, y });
+}
+
 // ---------- state & menus ----------
 function push(w) {
   if (w.win.isDestroyed()) return;
@@ -569,6 +717,7 @@ function push(w) {
     canBack: wc ? safe(() => navOf(wc).canGoBack(), false) : false,
     canForward: wc ? safe(() => navOf(wc).canGoForward(), false) : false,
     groups: w.groups,
+    isBookmarked: !!(tab && bookmarks.some((bookmark) => bookmark.url === tab.url)),
     trackersBlocked,
     blockerOn,
     theme: settings.theme,
@@ -603,6 +752,25 @@ function tabGroupItems(w) {
         },
       ],
     },
+  ];
+}
+
+function bookmarkItems(w) {
+  const tab = activeTab(w);
+  const isBookmarked = !!(tab && bookmarks.some((bookmark) => bookmark.url === tab.url));
+  return [
+    {
+      label: isBookmarked ? 'Remove Bookmark' : 'Bookmark This Page',
+      enabled: !!(tab && /^https?:\/\//i.test(tab.url)),
+      click: () => toggleBookmark(w),
+    },
+    ...(bookmarks.length ? [{ type: 'separator' }] : []),
+    ...(bookmarks.length
+      ? bookmarks.map((bookmark) => ({
+        label: bookmark.title || bookmark.url,
+        click: () => createTab(w, bookmark.url),
+      }))
+      : [{ label: 'No Bookmarks', enabled: false }]),
   ];
 }
 
@@ -689,6 +857,7 @@ function dotsTemplate(w) {
     { label: 'New Private Window', click: () => createWindow({ isPrivate: true }) },
     { type: 'separator' },
     { label: 'Settings...', click: () => openSettings(w) },
+    { label: 'Bookmarks', submenu: bookmarkItems(w) },
     { label: 'Tab Groups', submenu: tabGroupItems(w) },
     { label: 'Privacy', submenu: privacyItems(w) },
     { type: 'separator' },
@@ -842,11 +1011,24 @@ ipcMain.handle('passwords:delete', (event, id) => {
 });
 
 // ---------- IPC from the toolbar UI ----------
+ipcMain.on('login-field-focus', (event, bounds) => {
+  for (const w of windows) {
+    const tab = w.tabs.find((item) => item.view.webContents === event.sender);
+    if (tab && activeTab(w) === tab) {
+      showLoginPasswordMenu(w, tab, bounds);
+      return;
+    }
+  }
+});
+
 ipcMain.on('cmd', (event, name, p = {}) => {
   const w = windowFor(event.sender);
   if (!w) return;
   switch (name) {
     case 'tab:new': createTab(w, HOME_PAGE); break;
+    case 'tab:drop': dropTab(w, p.sourceId, p.targetId, p.groupId); break;
+    case 'bookmark:toggle': toggleBookmark(w); break;
+    case 'passwords:menu': showPasswordsMenu(w, p.x, p.y); break;
     case 'group:new-active': { const tab = activeTab(w); newGroup(w, tab && tab.id); break; }
     case 'open-settings': openSettings(w); break;
     case 'tab:select': activate(w, p.id); break;

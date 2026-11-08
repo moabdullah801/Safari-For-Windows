@@ -39,8 +39,11 @@
         <button id="share" class="icon-btn" title="Copy link" aria-label="Copy link">
           <svg viewBox="0 0 16 16"><path d="M5 6H4v8h8V6h-1"/><path d="M8 9.5V2M5.5 4.5 8 2l2.5 2.5"/></svg>
         </button>
-        <button id="new-tab" class="icon-btn" title="New tab" aria-label="New tab">
-          <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>
+        <button id="bookmark" class="icon-btn" title="Bookmark this page" aria-label="Bookmark this page">
+          <svg viewBox="0 0 16 16"><path d="m8 2 1.8 3.8 4.2.6-3 2.9.7 4.2L8 11.5l-3.7 2 .7-4.2-3-2.9 4.2-.6z"/></svg>
+        </button>
+        <button id="passwords" class="icon-btn" title="Saved passwords" aria-label="Saved passwords">
+          <svg viewBox="0 0 16 16"><circle cx="5.2" cy="8" r="3"/><path d="M8.2 8H14m-2 0v2m-2-2v2"/></svg>
         </button>
         <button id="group-tab" class="icon-btn" title="Group this tab" aria-label="Group this tab">
           <svg viewBox="0 0 16 16"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M5 6h6M5 9h3"/></svg>
@@ -59,7 +62,12 @@
       </div>
     </div>
 
-    <div id="tabs" class="tabs" role="tablist"></div>
+    <div class="tabs-row">
+      <div id="tabs" class="tabs" role="tablist"></div>
+      <button id="new-tab" class="new-tab-btn" title="New tab" aria-label="New tab">
+        <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>
+      </button>
+    </div>
   </header>
 
   <script src="app.js"></script>

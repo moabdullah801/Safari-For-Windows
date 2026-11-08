@@ -8,7 +8,7 @@
     duckduckgo: ['DuckDuckGo', 'https://duckduckgo.com/'],
     bing: ['Bing', 'https://www.bing.com/search'],
   };
-  const [name, action] = engines.get(query.get('search')) || engines.get('google');
+  const [name, action] = engines[query.get('search')] || engines.google;
   document.getElementById('search-form').action = action;
   document.getElementById('engine-label').textContent = name;
 })();

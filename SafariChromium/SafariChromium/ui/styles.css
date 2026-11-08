@@ -207,8 +207,19 @@ body.private .private-badge { display: inline-block; }
 .win-controls svg { width: 10px; height: 10px; stroke-width: 1.2; }
 
 /* ---------- tab strip ---------- */
+.tabs-row {
+  height: 40px;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  background: var(--bar);
+  -webkit-app-region: drag;
+}
+
 .tabs {
   height: 40px;
+  min-width: 0;
+  flex: 1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -219,6 +230,24 @@ body.private .private-badge { display: inline-block; }
   -webkit-app-region: drag;
 }
 .tabs::-webkit-scrollbar { display: none; }
+
+.new-tab-btn {
+  width: 30px;
+  height: 28px;
+  flex: none;
+  margin: 0 8px 0 2px;
+  display: grid;
+  place-items: center;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--muted);
+  cursor: default;
+  -webkit-app-region: no-drag;
+}
+.new-tab-btn:hover { background: var(--hover); color: var(--text); }
+.new-tab-btn svg { width: 15px; height: 15px; }
+.icon-btn.bookmarked svg { fill: #f0ad3d; stroke: #f0ad3d; }
 
 .tab {
   -webkit-app-region: no-drag;
@@ -234,7 +263,10 @@ body.private .private-badge { display: inline-block; }
   background: var(--tab);
   color: var(--muted);
   cursor: default;
+  transition: transform 180ms cubic-bezier(.2,.8,.2,1), opacity 150ms ease, box-shadow 150ms ease;
 }
+.tab.dragging { opacity: 0.45; transform: scale(0.94); will-change: transform; }
+.tab.drag-over { position: relative; z-index: 1; transform: scale(1.045); will-change: transform; }
 .tab:hover { color: var(--text); }
 .tab.active {
   background: var(--tab-active);
@@ -309,4 +341,9 @@ body.private .private-badge { display: inline-block; }
   user-select: text;
   box-shadow: 0 0 0 2px var(--accent);
   color: var(--text);
+}
+.group-label.drag-over { box-shadow: 0 0 0 2px var(--gc); }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab { transition-duration: 0.01ms; }
 }

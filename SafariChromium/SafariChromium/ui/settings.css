@@ -55,6 +55,7 @@ button { font: inherit; cursor: pointer; }
 .secondary-button:hover, .mini-button:hover { border-color: var(--accent); }
 .primary-button { border-color: var(--accent); background: var(--accent); color: #fff; }
 .passwords-section { padding-bottom: 10px; }
+.passkeys-section { border-bottom: 0; }
 .import-note { max-width: 580px; margin: 12px 0 16px; }
 .password-form { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(120px, 1fr) minmax(130px, 1fr) auto; gap: 8px; }
 .password-form input { width: 100%; min-width: 0; }

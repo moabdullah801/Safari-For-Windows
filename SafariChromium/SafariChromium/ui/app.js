@@ -11,6 +11,7 @@
     theme: 'system',
   };
   let editingGroup = false; // don't rebuild the tab strip while a group is being renamed
+  let draggingTabId = null;
 
   const send = (name, payload) => window.browser.send(name, payload);
 
@@ -48,20 +49,38 @@
       ? `Content blocker on. Trackers blocked: ${state.trackersBlocked}. Click to turn off.`
       : 'Content blocker is off. Click to turn on.';
     $('shield-count').textContent = state.trackersBlocked;
+    $('bookmark').classList.toggle('bookmarked', state.isBookmarked);
+    $('bookmark').title = state.isBookmarked ? 'Remove bookmark' : 'Bookmark this page';
 
     if (document.activeElement !== address) address.value = shortUrl(state.url);
     renderTabs();
   }
 
   function renderTabs() {
-    if (editingGroup) return;
-    tabsEl.textContent = '';
+    if (editingGroup || draggingTabId !== null) return;
+    const previousRects = new Map([...tabsEl.querySelectorAll('.tab')].map((el) => [el.dataset.tabId, el.getBoundingClientRect()]));
+    tabsEl.replaceChildren();
     let lastGroupId = null;
     for (const tab of state.tabs) {
       const group = state.groups.find((g) => g.id === tab.groupId) || null;
       if (group && group.id !== lastGroupId) tabsEl.appendChild(groupLabel(group));
       lastGroupId = group ? group.id : null;
       tabsEl.appendChild(tabElement(tab, group));
+    }
+    for (const el of tabsEl.querySelectorAll('.tab')) {
+      const previous = previousRects.get(el.dataset.tabId);
+      if (!previous) continue;
+      const current = el.getBoundingClientRect();
+      const offsetX = previous.left - current.left;
+      const offsetY = previous.top - current.top;
+      if (!offsetX && !offsetY) continue;
+      el.style.transition = 'none';
+      el.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+      el.getBoundingClientRect();
+      requestAnimationFrame(() => {
+        el.style.transition = '';
+        el.style.transform = '';
+      });
     }
     const active = tabsEl.querySelector('.tab.active');
     if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
@@ -75,6 +94,36 @@
     if (group) el.style.setProperty('--gc', group.color);
     el.title = tab.title;
     el.setAttribute('role', 'tab');
+    el.dataset.tabId = String(tab.id);
+    el.draggable = true;
+
+    el.addEventListener('dragstart', (event) => {
+      if (event.target.closest('button')) { event.preventDefault(); return; }
+      draggingTabId = tab.id;
+      event.dataTransfer.effectAllowed = 'move';
+      event.dataTransfer.setData('text/plain', String(tab.id));
+      requestAnimationFrame(() => el.classList.add('dragging'));
+    });
+    el.addEventListener('dragend', () => {
+      draggingTabId = null;
+      renderTabs();
+    });
+    el.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', (event) => {
+      if (!el.contains(event.relatedTarget)) el.classList.remove('drag-over');
+    });
+    el.addEventListener('drop', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const sourceId = Number(event.dataTransfer.getData('text/plain')) || draggingTabId;
+      el.classList.remove('drag-over');
+      draggingTabId = null;
+      if (sourceId !== null) send('tab:drop', { sourceId, targetId: tab.id });
+    });
 
     el.addEventListener('click', () => send('tab:select', { id: tab.id }));
     el.addEventListener('auxclick', (event) => {
@@ -119,6 +168,20 @@
     el.style.setProperty('--gc', group.color);
     el.textContent = group.name;
     el.title = 'Double-click to rename';
+    el.addEventListener('dragover', (event) => {
+      event.preventDefault();
+      event.dataTransfer.dropEffect = 'move';
+      el.classList.add('drag-over');
+    });
+    el.addEventListener('dragleave', () => el.classList.remove('drag-over'));
+    el.addEventListener('drop', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const sourceId = Number(event.dataTransfer.getData('text/plain')) || draggingTabId;
+      el.classList.remove('drag-over');
+      draggingTabId = null;
+      if (sourceId !== null) send('tab:drop', { sourceId, groupId: group.id });
+    });
 
     el.addEventListener('dblclick', () => {
       editingGroup = true;
@@ -144,6 +207,17 @@
     return el;
   }
 
+  tabsEl.addEventListener('dragover', (event) => {
+    if (event.target === tabsEl) event.preventDefault();
+  });
+  tabsEl.addEventListener('drop', (event) => {
+    if (event.target !== tabsEl) return;
+    event.preventDefault();
+    const sourceId = Number(event.dataTransfer.getData('text/plain')) || draggingTabId;
+    draggingTabId = null;
+    if (sourceId !== null) send('tab:drop', { sourceId });
+  });
+
   // ---------- toolbar buttons ----------
   $('back').addEventListener('click', () => send('nav', { action: 'back' }));
   $('forward').addEventListener('click', () => send('nav', { action: 'forward' }));
@@ -151,6 +225,11 @@
   $('new-tab').addEventListener('click', () => send('tab:new'));
   $('group-tab').addEventListener('click', () => send('group:new-active'));
   $('settings').addEventListener('click', () => send('open-settings'));
+  $('bookmark').addEventListener('click', () => send('bookmark:toggle'));
+  $('passwords').addEventListener('click', (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    send('passwords:menu', { x: rect.left, y: rect.bottom });
+  });
   $('share').addEventListener('click', () => send('copy-link'));
   $('shield').addEventListener('click', () => send('toggle-blocker'));
   $('dots').addEventListener('click', (event) => {
