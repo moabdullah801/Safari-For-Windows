@@ -82,7 +82,9 @@ button { font: inherit; cursor: pointer; }
 .password-row small { color: var(--muted); font-size: 11px; }
 .mini-button { min-height: 29px; padding: 0 8px; font-size: 11px; }
 .remove-button { color: var(--danger); }
-.settings-status { position: fixed; right: 18px; bottom: 8px; color: var(--muted); font-size: 11px; }
+.settings-footer { position: sticky; bottom: 0; z-index: 3; display: flex; align-items: center; gap: 14px; margin-top: 16px; padding: 10px 0; border-top: 1px solid var(--line); background: var(--page); }
+.settings-status { flex: 1; margin: 0; color: var(--muted); font-size: 11px; }
+.primary-button:disabled { opacity: 0.5; cursor: not-allowed; }
 @media (max-width: 680px) {
   body { padding: 20px 16px 42px; }
   .password-form { grid-template-columns: 1fr 1fr; }

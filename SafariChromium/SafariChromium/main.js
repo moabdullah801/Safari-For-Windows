@@ -26,6 +26,7 @@ const SETTINGS_DEFAULTS = {
   javascriptEnabled: true,
   ublockEnabled: true,
   cookiesEnabled: true,
+  cacheEnabled: true,
   extraExtensions: [],
   downloadSafetyScanEnabled: true,
   memoryBudgetGB: 'auto',
@@ -85,6 +86,7 @@ if (settings.theme === 'light' || settings.theme === 'dark' || settings.theme ==
 if (!Object.hasOwn(SEARCH_ENGINES, settings.searchEngine)) settings.searchEngine = 'google';
 if (!Array.isArray(settings.extraExtensions)) settings.extraExtensions = [];
 if (typeof settings.suppressUpdateNotices !== 'boolean') settings.suppressUpdateNotices = false;
+if (settings.cacheEnabled === false) app.commandLine.appendSwitch('disable-http-cache');
 if (!['auto', 2, 4, 6, 8].includes(settings.memoryBudgetGB)) settings.memoryBudgetGB = 'auto';
 if (!['balanced', 'conserve'].includes(settings.backgroundPolicy)) settings.backgroundPolicy = 'balanced';
 if (![0, 5, 10, 20, 30].includes(settings.backgroundSuspendMinutes)) settings.backgroundSuspendMinutes = 10;
@@ -1338,7 +1340,7 @@ ipcMain.handle('settings:save', (event, updates = {}) => {
   const previous = { ...settings };
   if (['system', 'light', 'dark'].includes(updates.theme)) settings.theme = updates.theme;
   if (Object.hasOwn(SEARCH_ENGINES, updates.searchEngine)) settings.searchEngine = updates.searchEngine;
-  for (const key of ['javascriptEnabled', 'ublockEnabled', 'cookiesEnabled', 'webAssemblyEnabled', 'hardwareAcceleration', 'suppressUpdateNotices', 'sendPrivacyHeaders', 'developerToolsEnabled', 'downloadSafetyScanEnabled']) {
+  for (const key of ['javascriptEnabled', 'ublockEnabled', 'cookiesEnabled', 'cacheEnabled', 'webAssemblyEnabled', 'hardwareAcceleration', 'suppressUpdateNotices', 'sendPrivacyHeaders', 'developerToolsEnabled', 'downloadSafetyScanEnabled']) {
     if (typeof updates[key] === 'boolean') settings[key] = updates[key];
   }
   if (['auto', 2, 4, 6, 8].includes(updates.memoryBudgetGB)) settings.memoryBudgetGB = updates.memoryBudgetGB;
@@ -1369,7 +1371,8 @@ ipcMain.handle('settings:save', (event, updates = {}) => {
     ok: saved,
     saved,
     restartRequired: previous.webAssemblyEnabled !== settings.webAssemblyEnabled
-      || previous.hardwareAcceleration !== settings.hardwareAcceleration,
+      || previous.hardwareAcceleration !== settings.hardwareAcceleration
+      || previous.cacheEnabled !== settings.cacheEnabled,
   };
 });
 
@@ -1384,16 +1387,7 @@ ipcMain.handle('performance:sample', (event) => {
 
 ipcMain.handle('performance:recommend', (event) => {
   if (!isSettingsSender(event.sender)) return { ok: false, error: 'Not allowed.' };
-  const previous = { memoryBudgetGB: settings.memoryBudgetGB, backgroundPolicy: settings.backgroundPolicy, backgroundSuspendMinutes: settings.backgroundSuspendMinutes };
-  const recommendation = recommendedPerformance();
-  settings.memoryBudgetGB = recommendation.memoryBudgetGB;
-  settings.backgroundPolicy = recommendation.backgroundPolicy;
-  settings.backgroundSuspendMinutes = recommendation.backgroundSuspendMinutes;
-  if (!saveSettings()) {
-    Object.assign(settings, previous);
-    return { ok: false, error: 'Could not save recommended settings.' };
-  }
-  return { ok: true, recommendation };
+  return { ok: true, recommendation: recommendedPerformance() };
 });
 
 ipcMain.handle('settings:set-default-browser', async (event) => {

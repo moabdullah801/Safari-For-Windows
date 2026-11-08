@@ -71,6 +71,7 @@
     <section class="settings-section" data-settings-panel="advanced">
       <h2>Cookies &amp; Cache</h2>
       <label class="toggle-row"><span><strong>Allow cookies</strong><small>Some sites require cookies to sign in or remember preferences</small></span><input type="checkbox" data-setting="cookiesEnabled"></label>
+      <label class="toggle-row"><span><strong>Enable cache files</strong><small>Recommended for faster page loads; restart required when changed</small></span><input type="checkbox" data-setting="cacheEnabled"></label>
       <div class="data-actions">
         <button id="clear-cookies" class="secondary-button" type="button">Clear cookies</button>
         <button id="clear-cache" class="secondary-button" type="button">Clear cache</button>
@@ -120,7 +121,10 @@
       <p class="section-note">On supported HTTPS sites, passkeys use Chromium WebAuthn and Windows Hello or a security key. Create and manage them in the site's account settings; passkey private keys stay in the Windows credential provider.</p>
     </section>
   </main>
-  <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>
+  <footer class="settings-footer">
+    <p id="settings-status" class="settings-status" role="status" aria-live="polite">All settings saved</p>
+    <button id="save-settings" class="primary-button" type="button" disabled>Save settings</button>
+  </footer>
   <script src="settings.js"></script>
 </body>
 </html>

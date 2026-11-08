@@ -4,6 +4,8 @@
   const passwordStatus = $('#password-status');
   const settingControls = [...document.querySelectorAll('[data-setting]')];
   let activeSettingsTab = 'general';
+  let savedSettings = {};
+  let settingsLoaded = false;
 
   function showSettingsTab(name) {
     activeSettingsTab = name;
@@ -27,23 +29,34 @@
     $('#update-status').textContent = message;
   });
 
-  async function saveSetting(control) {
-    let value = control.type === 'checkbox' ? control.checked : control.value;
-    if (['memoryBudgetGB', 'backgroundSuspendMinutes'].includes(control.dataset.setting)
-      && value !== 'auto') value = Number(value);
-    const result = await window.browser.settings.save({ [control.dataset.setting]: value });
-    if (!result.ok) {
-      setStatus(settingsStatus, 'Could not save this setting.', true);
-      return;
+  function collectSettings() {
+    const updates = {};
+    for (const control of settingControls) {
+      let value = control.type === 'checkbox' ? control.checked : control.value;
+      if (['memoryBudgetGB', 'backgroundSuspendMinutes'].includes(control.dataset.setting)
+        && value !== 'auto') value = Number(value);
+      updates[control.dataset.setting] = value;
     }
-    if (control.dataset.setting === 'theme') {
-      if (value === 'system') document.documentElement.removeAttribute('data-theme');
-      else document.documentElement.dataset.theme = value;
+    return updates;
+  }
+
+  function updateDirtyState() {
+    if (!settingsLoaded) return;
+    const updates = collectSettings();
+    const dirty = Object.keys(updates).some((key) => updates[key] !== savedSettings[key]);
+    $('#save-settings').disabled = !dirty;
+    setStatus(settingsStatus, dirty ? 'Unsaved changes' : 'All settings saved');
+  }
+
+  function setControls(settings) {
+    for (const control of settingControls) {
+      const value = settings[control.dataset.setting];
+      if (control.type === 'checkbox') control.checked = !!value;
+      else control.value = String(value);
     }
-    if (result.restartRequired) setStatus(settingsStatus, 'Saved. Restart Safari to apply this change.');
-    else setStatus(settingsStatus, 'Saved');
-    if (control.dataset.setting === 'memoryBudgetGB' || control.dataset.setting === 'backgroundPolicy'
-      || control.dataset.setting === 'backgroundSuspendMinutes') updatePerformanceReadout();
+    savedSettings = collectSettings();
+    settingsLoaded = true;
+    updateDirtyState();
   }
 
   async function updatePerformanceReadout() {
@@ -144,12 +157,13 @@
     $('#app-version').textContent = `Safari ${settings.appVersion} · Electron ${settings.electronVersion}`;
     $('#update-status').textContent = settings.updateStatus;
     $('#hardware-info').textContent = `Detected ${settings.hardwareInfo.memoryGB} GB RAM and ${settings.hardwareInfo.cpuCores} logical CPUs.`;
+    setControls(settings);
     renderExtensions(settings.extensions || []);
     for (const control of settingControls) {
-      control.type === 'checkbox'
-        ? control.checked = settings[control.dataset.setting]
-        : control.value = settings[control.dataset.setting];
-      control.addEventListener('change', () => saveSetting(control));
+      control.addEventListener('change', () => {
+        updateDirtyState();
+        if (['memoryBudgetGB', 'backgroundPolicy', 'backgroundSuspendMinutes'].includes(control.dataset.setting)) updatePerformanceReadout();
+      });
     }
     $('#default-status').textContent = settings.defaultBrowser
       ? 'Safari has registered HTTP handling. Windows may require confirmation in Default apps.'
@@ -170,6 +184,21 @@
     button.addEventListener('click', () => showSettingsTab(button.dataset.settingsTab));
   }
   showSettingsTab('general');
+
+  $('#save-settings').addEventListener('click', async () => {
+    const updates = collectSettings();
+    const result = await window.browser.settings.save(updates);
+    if (!result.ok) {
+      setStatus(settingsStatus, 'Could not save settings. Your changes are still here; try again.', true);
+      return;
+    }
+    savedSettings = updates;
+    if (updates.theme === 'system') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.dataset.theme = updates.theme;
+    updateDirtyState();
+    if (result.restartRequired) setStatus(settingsStatus, 'Settings saved. Restart Safari to apply WebAssembly or hardware acceleration changes.');
+    if (activeSettingsTab === 'performance') updatePerformanceReadout();
+  });
 
   $('#import-passwords').addEventListener('click', async () => {
     const result = await window.browser.settings.importPasswords();
@@ -226,7 +255,8 @@
     $('#memory-budget').value = String(result.recommendation.memoryBudgetGB);
     $('#background-policy').value = result.recommendation.backgroundPolicy;
     $('#suspend-minutes').value = String(result.recommendation.backgroundSuspendMinutes);
-    setStatus(settingsStatus, `Recommended for ${result.recommendation.memoryGB} GB RAM and ${result.recommendation.cpuCores} logical CPUs.`);
+    updateDirtyState();
+    setStatus(settingsStatus, `Recommended for ${result.recommendation.memoryGB} GB RAM and ${result.recommendation.cpuCores} logical CPUs. Save to apply.`);
     updatePerformanceReadout();
   });
 
