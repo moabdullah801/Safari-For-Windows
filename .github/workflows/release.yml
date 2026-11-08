@@ -1,0 +1,58 @@
+name: Release Safari
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: SafariChromium/SafariChromium
+
+      - name: Verify release version
+        shell: pwsh
+        working-directory: SafariChromium/SafariChromium
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          $tagVersion = $env:RELEASE_TAG.Substring(1)
+          $packageVersion = node -p "require('./package.json').version"
+          if ($tagVersion -ne $packageVersion) {
+            throw "Release tag v$packageVersion is required, received $env:RELEASE_TAG"
+          }
+
+      - name: Generate Windows icon
+        run: npm run build:icon
+        working-directory: SafariChromium/SafariChromium
+
+      - name: Build installer
+        run: npx electron-builder --win nsis --publish never
+        working-directory: SafariChromium/SafariChromium
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          name: Safari ${{ github.ref_name }}
+          generate_release_notes: true
+          files: |
+            SafariChromium/SafariChromium/dist/*.exe
+            SafariChromium/SafariChromium/dist/*.blockmap
+            SafariChromium/SafariChromium/dist/latest.yml

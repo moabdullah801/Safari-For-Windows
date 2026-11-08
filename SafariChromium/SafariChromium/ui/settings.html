@@ -29,11 +29,40 @@
     </section>
 
     <section class="settings-section">
+      <h2>Software Updates</h2>
+      <div class="update-row">
+        <div><strong id="app-version">Safari</strong><p id="update-status" class="section-note">Checking for updates when Safari starts.</p></div>
+        <button id="check-updates" class="secondary-button" type="button">Check now</button>
+      </div>
+      <label class="toggle-row"><span><strong>Don't show update notices</strong><small>Safari will still check for updates each time it opens</small></span><input type="checkbox" data-setting="suppressUpdateNotices"></label>
+    </section>
+
+    <section class="settings-section">
       <h2>Privacy &amp; Performance</h2>
       <label class="toggle-row"><span><strong>JavaScript</strong><small>Disable scripts in every tab</small></span><input type="checkbox" data-setting="javascriptEnabled"></label>
       <label class="toggle-row"><span><strong>uBlock Origin</strong><small>Filter ads and unwanted requests</small></span><input type="checkbox" data-setting="ublockEnabled"></label>
       <label class="toggle-row"><span><strong>WebAssembly</strong><small>Includes WebAssembly GC; restart required</small></span><input type="checkbox" data-setting="webAssemblyEnabled"></label>
       <label class="toggle-row"><span><strong>Hardware acceleration</strong><small>Recommended for video and cloud gaming; restart required</small></span><input type="checkbox" data-setting="hardwareAcceleration"></label>
+    </section>
+
+    <section class="settings-section">
+      <h2>Cookies &amp; Cache</h2>
+      <label class="toggle-row"><span><strong>Allow cookies</strong><small>Some sites require cookies to sign in or remember preferences</small></span><input type="checkbox" data-setting="cookiesEnabled"></label>
+      <div class="data-actions">
+        <button id="clear-cookies" class="secondary-button" type="button">Clear cookies</button>
+        <button id="clear-cache" class="secondary-button" type="button">Clear cache</button>
+      </div>
+      <p class="section-note">Clearing cookies signs you out of websites. Cache is used automatically and can be cleared here.</p>
+    </section>
+
+    <section class="settings-section extensions-section">
+      <h2>Extensions</h2>
+      <div class="data-actions">
+        <button id="open-extension-store" class="secondary-button" type="button">Chrome Web Store</button>
+        <button id="load-extension" class="secondary-button" type="button">Load unpacked extension</button>
+      </div>
+      <p class="section-note">The Web Store is available for browsing; its install flow is not supported by Electron. To load an extension, select its extracted folder containing manifest.json.</p>
+      <div id="extension-list" class="extension-list"></div>
     </section>
 
     <section class="settings-section default-section">

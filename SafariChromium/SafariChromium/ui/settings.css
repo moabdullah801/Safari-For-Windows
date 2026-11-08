@@ -40,6 +40,8 @@ h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 28px;
 h2 { margin: 0; font-size: 15px; font-weight: 650; }
 .select-row, .toggle-row { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .select-row { margin-top: 12px; }
+.update-row { min-height: 54px; display: flex; justify-content: space-between; align-items: center; gap: 18px; }
+.update-row > div { min-width: 0; }
 select, input:not([type="checkbox"]) { min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; }
 select { min-width: 190px; }
 .toggle-row { border-top: 1px solid var(--line); }
@@ -48,6 +50,12 @@ select { min-width: 190px; }
 .toggle-row strong { font-weight: 550; }
 .toggle-row small, .section-note { color: var(--muted); font-size: 12px; }
 .toggle-row input { width: 17px; height: 17px; accent-color: var(--accent); }
+.data-actions { display: flex; gap: 8px; padding: 12px 0 2px; }
+.extension-list { margin-top: 12px; border-top: 1px solid var(--line); }
+.extension-row { min-height: 54px; display: flex; align-items: center; justify-content: space-between; gap: 14px; border-bottom: 1px solid var(--line); }
+.extension-row > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.extension-row strong { font-size: 12px; font-weight: 600; }
+.extension-row small { color: var(--muted); font-size: 11px; }
 .default-section, .password-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
 .section-note { margin: 5px 0 0; }
 button { font: inherit; cursor: pointer; }

@@ -225,6 +225,10 @@
   $('new-tab').addEventListener('click', () => send('tab:new'));
   $('group-tab').addEventListener('click', () => send('group:new-active'));
   $('settings').addEventListener('click', () => send('open-settings'));
+  $('extensions').addEventListener('click', (event) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    send('extensions:menu', { x: rect.left, y: rect.bottom });
+  });
   $('bookmark').addEventListener('click', () => send('bookmark:toggle'));
   $('passwords').addEventListener('click', (event) => {
     const rect = event.currentTarget.getBoundingClientRect();

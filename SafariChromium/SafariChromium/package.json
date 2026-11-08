@@ -1,7 +1,7 @@
 {
   "name": "safari-chromium",
   "productName": "Safari",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Safari-style privacy browser built on Chromium (Electron)",
   "main": "main.js",
   "author": "",
@@ -18,13 +18,31 @@
   "build": {
     "appId": "com.safari.chromium",
     "productName": "Safari",
+    "publish": {
+      "provider": "github",
+      "owner": "moabdullah801",
+      "repo": "Safari-For-Windows"
+    },
     "protocols": [
-      { "name": "HTTP", "schemes": ["http"] },
-      { "name": "HTTPS", "schemes": ["https"] }
+      {
+        "name": "HTTP",
+        "schemes": [
+          "http"
+        ]
+      },
+      {
+        "name": "HTTPS",
+        "schemes": [
+          "https"
+        ]
+      }
     ],
     "fileAssociations": [
       {
-        "ext": ["html", "htm"],
+        "ext": [
+          "html",
+          "htm"
+        ],
         "name": "Safari HTML document",
         "description": "HTML document opened in Safari",
         "role": "Viewer",
@@ -53,5 +71,8 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Safari"
     }
+  },
+  "dependencies": {
+    "electron-updater": "^6.8.11"
   }
 }

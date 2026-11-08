@@ -6,6 +6,7 @@ const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
 const { fileURLToPath } = require('url');
+const { autoUpdater } = require('electron-updater');
 
 const CHROME_HEIGHT = 92;   // toolbar (52px) + tab strip (40px), must match styles.css
 const HOME_PAGE = 'safari://newtab';
@@ -20,6 +21,9 @@ const SETTINGS_DEFAULTS = {
   searchEngine: 'google',
   javascriptEnabled: true,
   ublockEnabled: true,
+  cookiesEnabled: true,
+  extraExtensions: [],
+  suppressUpdateNotices: false,
   webAssemblyEnabled: true,
   hardwareAcceleration: true,
 };
@@ -42,6 +46,7 @@ try {
 
 // Loaded uBlock Origin extension per session (null if it failed to load).
 const ublockIds = new WeakMap();
+const userExtensionIds = new WeakMap();
 
 let blockerOn = true;
 let trackersBlocked = 0;
@@ -51,6 +56,9 @@ let nextGroupId = 1;
 const windows = new Set();
 const settingsWindows = new Set();
 const configuredSessions = new WeakSet();
+let updateStatus = 'Updates are checked when Safari starts.';
+let updateCheckPromise = null;
+let updatePromptOpen = false;
 
 const settingsFile = path.join(app.getPath('userData'), 'settings.json');
 let settings = { ...SETTINGS_DEFAULTS };
@@ -64,6 +72,8 @@ if (settings.theme === 'light' || settings.theme === 'dark' || settings.theme ==
   settings.theme = SETTINGS_DEFAULTS.theme;
 }
 if (!Object.hasOwn(SEARCH_ENGINES, settings.searchEngine)) settings.searchEngine = 'google';
+if (!Array.isArray(settings.extraExtensions)) settings.extraExtensions = [];
+if (typeof settings.suppressUpdateNotices !== 'boolean') settings.suppressUpdateNotices = false;
 if (settings.hardwareAcceleration === false) app.disableHardwareAcceleration();
 if (settings.webAssemblyEnabled === false) app.commandLine.appendSwitch('js-flags', '--no-expose-wasm');
 
@@ -179,6 +189,24 @@ function removeUBlock(ses) {
   }
 }
 
+async function loadUserExtensions(ses, directories = settings.extraExtensions) {
+  let loaded = userExtensionIds.get(ses);
+  if (!loaded) {
+    loaded = new Map();
+    userExtensionIds.set(ses, loaded);
+  }
+  for (const directory of directories) {
+    const resolved = path.resolve(directory);
+    if (loaded.has(resolved) || !fs.existsSync(path.join(resolved, 'manifest.json'))) continue;
+    try {
+      const extension = await ses.extensions.loadExtension(resolved, { allowFileAccess: true });
+      loaded.set(resolved, extension.id);
+    } catch (err) {
+      console.warn(`Extension did not load from ${resolved}:`, err && err.message);
+    }
+  }
+}
+
 function configureSession(ses) {
   if (configuredSessions.has(ses)) return;
   configuredSessions.add(ses);
@@ -197,12 +225,27 @@ function configureSession(ses) {
   });
 
   if (settings.ublockEnabled) loadUBlock(ses);
+  if (ses === session.defaultSession) loadUserExtensions(ses);
 
   // Always ask sites not to track.
   ses.webRequest.onBeforeSendHeaders((details, callback) => {
+    if (!settings.cookiesEnabled) {
+      for (const name of Object.keys(details.requestHeaders)) {
+        if (['cookie', 'cookie2'].includes(name.toLowerCase())) delete details.requestHeaders[name];
+      }
+    }
     details.requestHeaders['DNT'] = '1';
     details.requestHeaders['Sec-GPC'] = '1';
     callback({ requestHeaders: details.requestHeaders });
+  });
+
+  ses.webRequest.onHeadersReceived((details, callback) => {
+    if (settings.cookiesEnabled) return callback({ responseHeaders: details.responseHeaders });
+    const responseHeaders = { ...details.responseHeaders };
+    for (const name of Object.keys(responseHeaders)) {
+      if (['set-cookie', 'set-cookie2'].includes(name.toLowerCase())) delete responseHeaders[name];
+    }
+    callback({ responseHeaders });
   });
 }
 
@@ -245,6 +288,47 @@ function loadTabURL(tab, url) {
   }
   tab.isStartPage = false;
   wc.loadURL(url).catch(() => {});
+}
+
+function installedSiteLaunch() {
+  const urlArg = process.argv.find((arg) => arg.startsWith('--safari-app-url='));
+  if (!urlArg) return null;
+  try {
+    const url = Buffer.from(urlArg.slice('--safari-app-url='.length), 'base64url').toString('utf8');
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol)) return null;
+    const nameArg = process.argv.find((arg) => arg.startsWith('--safari-app-name='));
+    const name = nameArg
+      ? Buffer.from(nameArg.slice('--safari-app-name='.length), 'base64url').toString('utf8')
+      : parsed.hostname;
+    return { url: parsed.href, name: name.slice(0, 100) };
+  } catch (_) {
+    return null;
+  }
+}
+
+function createInstalledSiteWindow(url, name) {
+  configureSession(session.defaultSession);
+  const win = new BrowserWindow({
+    width: 1180,
+    height: 820,
+    minWidth: 520,
+    minHeight: 420,
+    title: name,
+    icon: path.join(__dirname, 'assets', 'safari.ico'),
+    webPreferences: {
+      contextIsolation: true,
+      sandbox: true,
+      backgroundThrottling: true,
+      javascript: settings.javascriptEnabled,
+    },
+  });
+  win.webContents.setWindowOpenHandler(({ url: target }) => {
+    if (/^https?:/i.test(target)) shell.openExternal(target);
+    return { action: 'deny' };
+  });
+  win.loadURL(url).catch(() => {});
+  return win;
 }
 
 // ---------- windows & layout ----------
@@ -803,6 +887,44 @@ function toggleBlocker() {
   windows.forEach(push);
 }
 
+function installWebsiteAsApp(w) {
+  const tab = activeTab(w);
+  if (!tab || !/^https?:\/\//i.test(tab.url)) return;
+  if (process.platform !== 'win32') {
+    dialog.showMessageBox(w.win, { type: 'info', message: 'Website shortcuts are currently supported on Windows.' });
+    return;
+  }
+
+  const name = (tab.title || new URL(tab.url).hostname)
+    .replace(/[<>:"/\\|?*\x00-\x1f]/g, '')
+    .trim()
+    .slice(0, 80) || 'Website';
+  const desktop = app.getPath('desktop');
+  let shortcutPath = path.join(desktop, `${name}.lnk`);
+  for (let suffix = 2; fs.existsSync(shortcutPath); suffix++) {
+    shortcutPath = path.join(desktop, `${name} (${suffix}).lnk`);
+  }
+
+  const appArgs = [];
+  if (!app.isPackaged) appArgs.push(path.resolve(process.argv[1] || '.'));
+  appArgs.push(`--safari-app-url=${Buffer.from(tab.url).toString('base64url')}`);
+  appArgs.push(`--safari-app-name=${Buffer.from(name).toString('base64url')}`);
+  const args = appArgs.map((value) => `"${value.replace(/"/g, '\\"')}"`).join(' ');
+  const created = shell.writeShortcutLink(shortcutPath, 'create', {
+    target: process.execPath,
+    args,
+    cwd: path.dirname(process.execPath),
+    description: `Open ${name} in Safari`,
+    icon: process.execPath,
+    iconIndex: 0,
+  });
+  if (!created) {
+    dialog.showMessageBox(w.win, { type: 'error', message: 'Safari could not create the desktop shortcut.' });
+    return;
+  }
+  dialog.showMessageBox(w.win, { type: 'info', message: `${name} was added to your desktop.` });
+}
+
 // Menu bar (used for keyboard shortcuts; the bar itself is hidden).
 function menuTemplate(w) {
   const tab = activeTab(w);
@@ -855,9 +977,11 @@ function dotsTemplate(w) {
   return [
     { label: 'New Tab', click: () => createTab(w, HOME_PAGE) },
     { label: 'New Private Window', click: () => createWindow({ isPrivate: true }) },
+    { label: 'Install This Site as an App...', enabled: !!(tab && /^https?:\/\//i.test(tab.url)), click: () => installWebsiteAsApp(w) },
     { type: 'separator' },
     { label: 'Settings...', click: () => openSettings(w) },
     { label: 'Bookmarks', submenu: bookmarkItems(w) },
+    { label: 'Extensions', submenu: extensionsMenuItems(w) },
     { label: 'Tab Groups', submenu: tabGroupItems(w) },
     { label: 'Privacy', submenu: privacyItems(w) },
     { type: 'separator' },
@@ -882,12 +1006,37 @@ function showDotsMenu(w, x, y) {
   });
 }
 
+function extensionsMenuItems(w) {
+  return [
+    { label: 'Chrome Web Store', click: () => createTab(w, 'https://chromewebstore.google.com/') },
+    { label: 'Manage Extensions...', click: () => openSettings(w) },
+  ];
+}
+
+function showExtensionsMenu(w, x, y) {
+  Menu.buildFromTemplate(extensionsMenuItems(w)).popup({
+    window: w.win,
+    x: Math.round(x || 0),
+    y: Math.round(y || 0),
+  });
+}
+
 ipcMain.handle('settings:get', (event) => {
   if (!isSettingsSender(event.sender)) return null;
+  const { extraExtensions: _directories, ...publicSettings } = settings;
   return {
-    ...settings,
+    ...publicSettings,
+    appVersion: app.getVersion(),
+    electronVersion: process.versions.electron,
+    updateStatus,
     defaultBrowser: process.platform === 'win32' && isDefaultWebProtocol('http'),
     secureStorageAvailable: isVaultEncryptionAvailable(),
+    extensions: session.defaultSession.extensions.getAllExtensions().map((extension) => ({
+      id: extension.id,
+      name: extension.name,
+      version: extension.version,
+      bundled: path.resolve(extension.path) === path.resolve(UBLOCK_DIR),
+    })),
   };
 });
 
@@ -896,7 +1045,7 @@ ipcMain.handle('settings:save', (event, updates = {}) => {
   const previous = { ...settings };
   if (['system', 'light', 'dark'].includes(updates.theme)) settings.theme = updates.theme;
   if (Object.hasOwn(SEARCH_ENGINES, updates.searchEngine)) settings.searchEngine = updates.searchEngine;
-  for (const key of ['javascriptEnabled', 'ublockEnabled', 'webAssemblyEnabled', 'hardwareAcceleration']) {
+  for (const key of ['javascriptEnabled', 'ublockEnabled', 'cookiesEnabled', 'webAssemblyEnabled', 'hardwareAcceleration', 'suppressUpdateNotices']) {
     if (typeof updates[key] === 'boolean') settings[key] = updates[key];
   }
   const saved = saveSettings();
@@ -932,6 +1081,79 @@ ipcMain.handle('settings:set-default-browser', async (event) => {
   if (!isSettingsSender(event.sender) || process.platform !== 'win32') return { ok: false };
   setDefaultWebProtocols();
   await shell.openExternal('ms-settings:defaultapps');
+  return { ok: true };
+});
+
+ipcMain.handle('settings:clear-data', async (event, kind) => {
+  if (!isSettingsSender(event.sender)) return { ok: false, error: 'Not allowed.' };
+  try {
+    if (kind === 'cookies') await session.defaultSession.clearStorageData({ storages: ['cookies'] });
+    else if (kind === 'cache') await session.defaultSession.clearCache();
+    else return { ok: false, error: 'Unknown browser data type.' };
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('updates:check', (event) => {
+  if (!isSettingsSender(event.sender)) return { ok: false, error: 'Not allowed.' };
+  return checkForUpdates();
+});
+
+ipcMain.handle('extensions:load-unpacked', async (event) => {
+  if (!isSettingsSender(event.sender)) return { ok: false, error: 'Not allowed.' };
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  const selection = await dialog.showOpenDialog(owner, {
+    title: 'Select an unpacked extension folder',
+    properties: ['openDirectory'],
+  });
+  if (selection.canceled || !selection.filePaths[0]) return { ok: false, canceled: true };
+  const directory = path.resolve(selection.filePaths[0]);
+  if (directory === path.resolve(UBLOCK_DIR)) return { ok: false, error: 'uBlock Origin is already managed by Safari settings.' };
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'manifest.json'), 'utf8'));
+    if (!manifest.name || !manifest.version) return { ok: false, error: 'The selected folder has no valid extension manifest.' };
+    const existing = session.defaultSession.extensions.getAllExtensions().find((extension) => path.resolve(extension.path) === directory);
+    if (existing) return { ok: true, extension: { id: existing.id, name: existing.name, version: existing.version } };
+    const extension = await session.defaultSession.extensions.loadExtension(directory, { allowFileAccess: true });
+    const previousDirectories = settings.extraExtensions;
+    settings.extraExtensions = [...new Set([...settings.extraExtensions, directory])];
+    if (!saveSettings()) {
+      settings.extraExtensions = previousDirectories;
+      session.defaultSession.extensions.removeExtension(extension.id);
+      return { ok: false, error: 'The extension loaded but its folder could not be saved.' };
+    }
+    userExtensionIds.get(session.defaultSession)?.set(directory, extension.id);
+    return { ok: true, extension: { id: extension.id, name: extension.name, version: extension.version } };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('extensions:remove', (event, extensionId) => {
+  if (!isSettingsSender(event.sender)) return { ok: false, error: 'Not allowed.' };
+  const extensions = session.defaultSession.extensions;
+  const extension = extensions.getAllExtensions().find((item) => item.id === extensionId);
+  if (!extension) return { ok: false, error: 'Extension is no longer loaded.' };
+  if (path.resolve(extension.path) === path.resolve(UBLOCK_DIR)) return { ok: false, error: 'Manage uBlock Origin with its Settings toggle.' };
+  const directory = path.resolve(extension.path);
+  const previous = settings.extraExtensions;
+  settings.extraExtensions = previous.filter((item) => path.resolve(item) !== directory);
+  if (!saveSettings()) {
+    settings.extraExtensions = previous;
+    return { ok: false, error: 'Could not save extension settings.' };
+  }
+  extensions.removeExtension(extension.id);
+  userExtensionIds.get(session.defaultSession)?.delete(directory);
+  return { ok: true };
+});
+
+ipcMain.handle('extensions:open-store', (event) => {
+  if (!isSettingsSender(event.sender)) return { ok: false };
+  const w = [...windows].find((browserWindow) => !browserWindow.win.isDestroyed());
+  if (!w) return { ok: false };
+  createTab(w, 'https://chromewebstore.google.com/');
   return { ok: true };
 });
 
@@ -1029,6 +1251,8 @@ ipcMain.on('cmd', (event, name, p = {}) => {
     case 'tab:drop': dropTab(w, p.sourceId, p.targetId, p.groupId); break;
     case 'bookmark:toggle': toggleBookmark(w); break;
     case 'passwords:menu': showPasswordsMenu(w, p.x, p.y); break;
+    case 'extensions:menu': showExtensionsMenu(w, p.x, p.y); break;
+    case 'extensions:store': createTab(w, 'https://chromewebstore.google.com/'); break;
     case 'group:new-active': { const tab = activeTab(w); newGroup(w, tab && tab.id); break; }
     case 'open-settings': openSettings(w); break;
     case 'tab:select': activate(w, p.id); break;
@@ -1047,6 +1271,113 @@ ipcMain.on('cmd', (event, name, p = {}) => {
   }
 });
 
+function sendUpdateStatus(message) {
+  updateStatus = message;
+  for (const win of settingsWindows) {
+    if (!win.isDestroyed()) win.webContents.send('update-status', message);
+  }
+}
+
+async function offerUpdate(info) {
+  if (settings.suppressUpdateNotices) {
+    sendUpdateStatus(`Version ${info.version} is available. Update notices are suppressed.`);
+    return;
+  }
+  if (updatePromptOpen) return;
+  updatePromptOpen = true;
+  const owner = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed());
+  const options = {
+    type: 'info',
+    title: 'Safari update available',
+    message: `Safari ${info.version} is available.`,
+    detail: 'Would you like to download and install this update now?',
+    buttons: ['Update', 'Do not update'],
+    defaultId: 0,
+    cancelId: 1,
+    checkboxLabel: "Don't show update notices again",
+    checkboxChecked: false,
+  };
+  try {
+    const result = owner
+      ? await dialog.showMessageBox(owner, options)
+      : await dialog.showMessageBox(options);
+    updatePromptOpen = false;
+    if (result.checkboxChecked) {
+      settings.suppressUpdateNotices = true;
+      saveSettings();
+    }
+    if (result.response !== 0) {
+      sendUpdateStatus(`Version ${info.version} is available.`);
+      return;
+    }
+    sendUpdateStatus('Downloading update...');
+    await autoUpdater.downloadUpdate();
+  } catch (err) {
+    updatePromptOpen = false;
+    sendUpdateStatus(`Update download failed: ${err.message}`);
+  }
+}
+
+async function offerRestart(info) {
+  if (settings.suppressUpdateNotices) {
+    sendUpdateStatus(`Version ${info.version} is ready and will install when Safari next closes.`);
+    return;
+  }
+  const owner = BrowserWindow.getAllWindows().find((win) => !win.isDestroyed());
+  const options = {
+    type: 'info',
+    title: 'Update ready',
+    message: `Safari ${info.version} has finished downloading.`,
+    detail: 'Restart Safari now to finish installing the update, or continue browsing and install when you next quit.',
+    buttons: ['Restart now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+  };
+  const result = owner
+    ? await dialog.showMessageBox(owner, options)
+    : await dialog.showMessageBox(options);
+  if (result.response === 0) autoUpdater.quitAndInstall();
+  else sendUpdateStatus(`Version ${info.version} will install when Safari next closes.`);
+}
+
+function checkForUpdates() {
+  if (!app.isPackaged || process.platform !== 'win32' || process.env.PORTABLE_EXECUTABLE_DIR) {
+    const error = 'Automatic updates are available in the installed Windows version.';
+    sendUpdateStatus(error);
+    return Promise.resolve({ ok: false, error });
+  }
+  if (updateCheckPromise) return updateCheckPromise;
+  sendUpdateStatus('Checking for updates...');
+  updateCheckPromise = autoUpdater.checkForUpdates()
+    .then(() => ({ ok: true }))
+    .catch((err) => {
+      const error = `Could not check for updates: ${err.message}`;
+      sendUpdateStatus(error);
+      return { ok: false, error };
+    })
+    .finally(() => { updateCheckPromise = null; });
+  return updateCheckPromise;
+}
+
+function setupAutoUpdater() {
+  if (!app.isPackaged || process.platform !== 'win32' || process.env.PORTABLE_EXECUTABLE_DIR) {
+    if (process.platform === 'win32') sendUpdateStatus('Automatic updates require the installed Windows version; portable builds update manually.');
+    return;
+  }
+  autoUpdater.autoDownload = false;
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.on('checking-for-update', () => sendUpdateStatus('Checking for updates...'));
+  autoUpdater.on('update-available', (info) => { offerUpdate(info); });
+  autoUpdater.on('update-not-available', (info) => sendUpdateStatus(`Safari ${info.version} is up to date.`));
+  autoUpdater.on('download-progress', (progress) => sendUpdateStatus(`Downloading update: ${Math.floor(progress.percent)}%`));
+  autoUpdater.on('update-downloaded', (info) => { offerRestart(info).catch((err) => sendUpdateStatus(err.message)); });
+  autoUpdater.on('error', (err) => {
+    console.warn('Update check failed:', err && err.message);
+    sendUpdateStatus(`Update check failed: ${err.message}`);
+  });
+  checkForUpdates();
+}
+
 // Keep the shield counter fresh while pages load.
 setInterval(() => {
   if (trackersBlocked !== lastBlockedSent) windows.forEach(push);
@@ -1058,8 +1389,14 @@ app.whenReady().then(() => {
     app.setAppUserModelId('com.safari.chromium');
     setDefaultWebProtocols();
   }
-  const startupUrl = process.argv.find((arg) => /^https?:\/\//i.test(arg));
-  createWindow({ url: startupUrl || HOME_PAGE });
+  const installedSite = installedSiteLaunch();
+  if (installedSite) {
+    createInstalledSiteWindow(installedSite.url, installedSite.name);
+  } else {
+    const startupUrl = process.argv.find((arg) => /^https?:\/\//i.test(arg));
+    createWindow({ url: startupUrl || HOME_PAGE });
+  }
+  setupAutoUpdater();
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

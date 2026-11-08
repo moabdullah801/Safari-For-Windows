@@ -9,6 +9,10 @@
     element.classList.toggle('error', error);
   }
 
+  window.browser.settings.onUpdateStatus((message) => {
+    $('#update-status').textContent = message;
+  });
+
   async function saveSetting(control) {
     const value = control.type === 'checkbox' ? control.checked : control.value;
     const result = await window.browser.settings.save({ [control.dataset.setting]: value });
@@ -68,9 +72,52 @@
     }
   }
 
+  function renderExtensions(extensions) {
+    const list = $('#extension-list');
+    list.replaceChildren();
+    if (!extensions.length) {
+      const empty = document.createElement('p');
+      empty.className = 'section-note';
+      empty.textContent = 'No extensions loaded.';
+      list.append(empty);
+      return;
+    }
+    for (const extension of extensions) {
+      const row = document.createElement('div');
+      row.className = 'extension-row';
+      const details = document.createElement('div');
+      const name = document.createElement('strong');
+      name.textContent = extension.name;
+      const version = document.createElement('small');
+      version.textContent = `Version ${extension.version}${extension.bundled ? ' · Built in' : ''}`;
+      details.append(name, version);
+      row.append(details);
+      if (!extension.bundled) {
+        const remove = document.createElement('button');
+        remove.className = 'mini-button remove-button';
+        remove.type = 'button';
+        remove.textContent = 'Remove';
+        remove.addEventListener('click', async () => {
+          const result = await window.browser.settings.removeExtension(extension.id);
+          if (!result.ok) {
+            setStatus(settingsStatus, result.error || 'Could not remove extension.', true);
+            return;
+          }
+          const current = await window.browser.settings.get();
+          renderExtensions(current.extensions || []);
+        });
+        row.append(remove);
+      }
+      list.append(row);
+    }
+  }
+
   window.browser.settings.get().then((settings) => {
     if (!settings) return;
     if (settings.theme === 'light' || settings.theme === 'dark') document.documentElement.dataset.theme = settings.theme;
+    $('#app-version').textContent = `Safari ${settings.appVersion} · Electron ${settings.electronVersion}`;
+    $('#update-status').textContent = settings.updateStatus;
+    renderExtensions(settings.extensions || []);
     for (const control of settingControls) {
       control.type === 'checkbox'
         ? control.checked = settings[control.dataset.setting]
@@ -115,4 +162,37 @@
       renderPasswords();
     }
   });
+
+  $('#open-extension-store').addEventListener('click', async () => {
+    const result = await window.browser.settings.openExtensionStore();
+    if (!result.ok) setStatus(settingsStatus, 'Could not open a browser tab for the Web Store.', true);
+  });
+
+  $('#load-extension').addEventListener('click', async () => {
+    const result = await window.browser.settings.loadUnpackedExtension();
+    if (result.canceled) return;
+    if (!result.ok) {
+      setStatus(settingsStatus, result.error || 'Could not load extension.', true);
+      return;
+    }
+    const current = await window.browser.settings.get();
+    renderExtensions(current.extensions || []);
+    setStatus(settingsStatus, `${result.extension.name} loaded.`);
+  });
+
+  $('#check-updates').addEventListener('click', async () => {
+    const result = await window.browser.settings.checkUpdates();
+    if (!result.ok) $('#update-status').textContent = result.error;
+  });
+
+  for (const [id, kind, message] of [
+    ['clear-cookies', 'cookies', 'Clear website cookies? This will sign you out of most sites.'],
+    ['clear-cache', 'cache', 'Clear cached website files?'],
+  ]) {
+    $(`#${id}`).addEventListener('click', async () => {
+      if (!window.confirm(message)) return;
+      const result = await window.browser.settings.clearData(kind);
+      setStatus(settingsStatus, result.ok ? `${kind === 'cookies' ? 'Cookies' : 'Cache'} cleared.` : (result.error || 'Could not clear browser data.'), !result.ok);
+    });
+  }
 })();
