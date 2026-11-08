@@ -10,7 +10,10 @@ A Safari-style privacy browser for Windows, built on Chromium using Electron.
 - **Bookmarks:** use the star button to save or remove the current page; open saved pages from the Bookmarks menu.
 - **Install websites:** choose "Install This Site as an App" from the top-right menu to add a Windows desktop shortcut that opens the site in its own browser window.
 - **Cookies and cache:** cookies are enabled by default and can be disabled in Settings. Clear cookies or cached files separately from the Cookies & Cache section.
+- **Downloads:** track progress from the toolbar. Files download to a temporary quarantine path, then Windows Defender scans them when available. Threat detections, risky executable/document types, and unavailable scans are flagged for an explicit Keep/Delete choice; SHA-256 is shown for verification.
 - **Extensions:** open the Extensions button to visit the Chrome Web Store or manage extensions. Extracted extensions can be loaded and removed in Settings.
+- **Performance:** see current app RAM/CPU use, choose a best-effort RAM target, and hibernate idle background tabs. Recommended settings are based on detected RAM and logical CPU count.
+- **Advanced settings:** control download scanning, privacy headers, Developer Tools, JavaScript, WebAssembly, cookies, and uBlock Origin.
 - **Settings:** toggle JavaScript and uBlock Origin, control WebAssembly and hardware acceleration (restart required), and set the search engine and appearance.
 - **Updates:** installed Windows builds check GitHub Releases at startup and can check manually in Settings. Available updates ask before downloading; notices can be suppressed in Settings while checks continue.
 - **Windows integration:** the installer creates Start Menu and desktop shortcuts and registers HTTP/HTTPS and HTML handling. Choose Safari in Windows Settings > Default apps to make it the default browser.
@@ -34,7 +37,9 @@ You need Node.js LTS from https://nodejs.org.
 cd safari-chromium
 npm install
 npm start            :: run it right away to test
-npm run build        :: creates an installer and a portable .exe in dist\
+npm run build:installer :: creates the NSIS installer in dist\
+npm run build:portable  :: creates the portable .exe in dist\
+npm run build           :: creates both Windows packages in dist\
 ```
 
 To publish an auto-updating Windows installer, increment the package version, commit the change, then push a matching `v` tag (for example `v1.0.2`). The release workflow publishes the NSIS installer and update metadata to GitHub Releases. Portable builds do not self-update and must be replaced manually.
@@ -72,6 +77,8 @@ The extension is loaded with Electron's extension support, which only implements
 - Passkey creation and selection depend on supported websites, Chromium WebAuthn, and Windows Hello or a security key. The app does not export or store passkey private keys.
 - Website desktop shortcuts are currently Windows-only. Chrome Web Store extensions can be browsed, but the store's install flow is not supported by Electron; load unpacked extension folders from Settings instead.
 - Automatic updates require the installed NSIS build and a matching tagged GitHub Release. Portable builds and unpackaged development runs do not auto-update.
+- Download scanning uses Windows Defender's command-line scanner when available; it is not a replacement for dedicated antivirus software. If the scanner is missing or cannot verify a download, Safari warns but cannot certify that file as safe.
+- Electron cannot hard-cap CPU usage, and the RAM target is best-effort. Hibernating a page releases background renderer memory but reloads it when selected, so unsaved page state may be lost.
 - Hardware acceleration is enabled by default and background pages are throttled, but actual CPU, GPU, and memory use depends on the sites and device. Cloud gaming performance cannot be guaranteed by the browser.
 - Windows requires the user to select Safari from Default apps; an installer cannot silently override the user's browser choice.
 - Electron 33 is pinned in `package.json`. You can update it, but test afterwards.

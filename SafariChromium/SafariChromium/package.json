@@ -9,6 +9,8 @@
   "scripts": {
     "start": "electron .",
     "build": "electron-builder --win",
+    "build:installer": "electron-builder --win nsis --publish never",
+    "build:portable": "electron-builder --win portable --publish never",
     "build:icon": "node tools/generate-icon.js"
   },
   "devDependencies": {

@@ -3,6 +3,20 @@
   const settingsStatus = $('#settings-status');
   const passwordStatus = $('#password-status');
   const settingControls = [...document.querySelectorAll('[data-setting]')];
+  let activeSettingsTab = 'general';
+
+  function showSettingsTab(name) {
+    activeSettingsTab = name;
+    for (const button of document.querySelectorAll('[data-settings-tab]')) {
+      const selected = button.dataset.settingsTab === name;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-selected', String(selected));
+    }
+    for (const panel of document.querySelectorAll('[data-settings-panel]')) {
+      panel.hidden = panel.dataset.settingsPanel !== name;
+    }
+    if (name === 'performance') updatePerformanceReadout();
+  }
 
   function setStatus(element, message, error = false) {
     element.textContent = message;
@@ -14,7 +28,9 @@
   });
 
   async function saveSetting(control) {
-    const value = control.type === 'checkbox' ? control.checked : control.value;
+    let value = control.type === 'checkbox' ? control.checked : control.value;
+    if (['memoryBudgetGB', 'backgroundSuspendMinutes'].includes(control.dataset.setting)
+      && value !== 'auto') value = Number(value);
     const result = await window.browser.settings.save({ [control.dataset.setting]: value });
     if (!result.ok) {
       setStatus(settingsStatus, 'Could not save this setting.', true);
@@ -26,6 +42,16 @@
     }
     if (result.restartRequired) setStatus(settingsStatus, 'Saved. Restart Safari to apply this change.');
     else setStatus(settingsStatus, 'Saved');
+    if (control.dataset.setting === 'memoryBudgetGB' || control.dataset.setting === 'backgroundPolicy'
+      || control.dataset.setting === 'backgroundSuspendMinutes') updatePerformanceReadout();
+  }
+
+  async function updatePerformanceReadout() {
+    if (activeSettingsTab !== 'performance') return;
+    const sample = await window.browser.settings.samplePerformance();
+    if (!sample.ok) return;
+    $('#performance-readout').textContent = `Safari is using about ${sample.memoryMB} MB RAM and ${sample.cpuPercent}% CPU. Target: ${sample.targetGB} GB. `
+      + `Device: ${sample.memoryGB} GB RAM, ${sample.cpuCores} logical CPUs.`;
   }
 
   async function renderPasswords() {
@@ -117,6 +143,7 @@
     if (settings.theme === 'light' || settings.theme === 'dark') document.documentElement.dataset.theme = settings.theme;
     $('#app-version').textContent = `Safari ${settings.appVersion} · Electron ${settings.electronVersion}`;
     $('#update-status').textContent = settings.updateStatus;
+    $('#hardware-info').textContent = `Detected ${settings.hardwareInfo.memoryGB} GB RAM and ${settings.hardwareInfo.cpuCores} logical CPUs.`;
     renderExtensions(settings.extensions || []);
     for (const control of settingControls) {
       control.type === 'checkbox'
@@ -138,6 +165,11 @@
     });
     renderPasswords();
   });
+
+  for (const button of document.querySelectorAll('[data-settings-tab]')) {
+    button.addEventListener('click', () => showSettingsTab(button.dataset.settingsTab));
+  }
+  showSettingsTab('general');
 
   $('#import-passwords').addEventListener('click', async () => {
     const result = await window.browser.settings.importPasswords();
@@ -184,6 +216,21 @@
     const result = await window.browser.settings.checkUpdates();
     if (!result.ok) $('#update-status').textContent = result.error;
   });
+
+  $('#recommend-performance').addEventListener('click', async () => {
+    const result = await window.browser.settings.recommendPerformance();
+    if (!result.ok) {
+      setStatus(settingsStatus, result.error || 'Could not apply recommended performance settings.', true);
+      return;
+    }
+    $('#memory-budget').value = String(result.recommendation.memoryBudgetGB);
+    $('#background-policy').value = result.recommendation.backgroundPolicy;
+    $('#suspend-minutes').value = String(result.recommendation.backgroundSuspendMinutes);
+    setStatus(settingsStatus, `Recommended for ${result.recommendation.memoryGB} GB RAM and ${result.recommendation.cpuCores} logical CPUs.`);
+    updatePerformanceReadout();
+  });
+
+  setInterval(updatePerformanceReadout, 3000);
 
   for (const [id, kind, message] of [
     ['clear-cookies', 'cookies', 'Clear website cookies? This will sign you out of most sites.'],

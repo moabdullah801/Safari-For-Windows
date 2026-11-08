@@ -71,6 +71,8 @@ html, body {
 button, input { font: inherit; -webkit-app-region: no-drag; }
 
 #chrome {
+  position: relative;
+  z-index: 2;
   height: 92px;
   display: flex;
   flex-direction: column;
@@ -206,6 +208,57 @@ body.private .private-badge { display: inline-block; }
 .win-controls button.close:hover { background: #e81123; color: #fff; }
 .win-controls svg { width: 10px; height: 10px; stroke-width: 1.2; }
 
+.download-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border: 2px solid var(--bar);
+  border-radius: 8px;
+  background: #e85d45;
+  color: #fff;
+  font-size: 8px;
+  line-height: 10px;
+  text-align: center;
+}
+.icon-btn { position: relative; }
+.icon-btn.has-downloads svg { color: var(--accent); }
+.icon-btn.has-flagged-download svg { color: #d64538; }
+
+.downloads-panel {
+  position: absolute;
+  z-index: 40;
+  top: 48px;
+  right: 150px;
+  width: min(380px, calc(100vw - 24px));
+  max-height: min(480px, calc(100vh - 110px));
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bar);
+  color: var(--text);
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.2);
+  -webkit-app-region: no-drag;
+}
+.downloads-panel[hidden] { display: none; }
+.downloads-header { height: 42px; display: flex; align-items: center; justify-content: space-between; padding: 0 12px; border-bottom: 1px solid var(--border); }
+.downloads-header h2 { margin: 0; font-size: 13px; font-weight: 650; }
+.text-button, .download-action { border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 11px; cursor: pointer; }
+.download-list { max-height: min(438px, calc(100vh - 152px)); overflow: auto; }
+.downloads-empty { margin: 0; padding: 20px 14px; color: var(--muted); font-size: 12px; text-align: center; }
+.download-entry { padding: 11px 12px; border-bottom: 1px solid var(--border); }
+.download-entry.flagged { background: color-mix(in srgb, #e85d45 9%, var(--bar)); }
+.download-name { display: block; overflow: hidden; font-size: 12px; font-weight: 600; text-overflow: ellipsis; white-space: nowrap; }
+.download-status, .download-detail, .download-warning { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; }
+.download-warning { color: #cf4334; }
+.download-entry progress { width: 100%; height: 4px; margin-top: 8px; accent-color: var(--accent); }
+.download-actions { display: flex; justify-content: flex-end; gap: 12px; margin-top: 7px; }
+.download-action { padding: 3px 0; }
+
+@media (max-width: 700px) { .downloads-panel { right: 8px; } }
+
 /* ---------- tab strip ---------- */
 .tabs-row {
   height: 40px;
@@ -268,6 +321,7 @@ body.private .private-badge { display: inline-block; }
 .tab.dragging { opacity: 0.45; transform: scale(0.94); will-change: transform; }
 .tab.drag-over { position: relative; z-index: 1; transform: scale(1.045); will-change: transform; }
 .tab:hover { color: var(--text); }
+.tab.hibernated .tab-icon, .tab.hibernated .tab-title { opacity: 0.62; }
 .tab.active {
   background: var(--tab-active);
   color: var(--text);

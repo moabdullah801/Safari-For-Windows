@@ -1,4 +1,4 @@
-name: Build Safari Portable
+name: Build Safari Windows Packages
 
 on:
   workflow_dispatch:
@@ -27,8 +27,8 @@ jobs:
         run: npm run build:icon
         working-directory: SafariChromium/SafariChromium
 
-      - name: Build portable Safari
-        run: npx electron-builder --win portable --publish never
+      - name: Build installer and portable Safari
+        run: npm run build -- --publish never
         working-directory: SafariChromium/SafariChromium
         env:
           CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
@@ -46,7 +46,7 @@ jobs:
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
-          name: Safari-Portable-Windows
+          name: Safari-Windows-Packages
           path: |
             SafariChromium/SafariChromium/dist/*.exe
             SafariChromium/SafariChromium/dist/SHA256SUMS.txt

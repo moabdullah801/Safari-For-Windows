@@ -13,22 +13,28 @@
     <div><p class="eyebrow">Safari for Windows</p><h1>Settings</h1></div>
   </header>
 
+  <nav class="settings-tabs" role="tablist" aria-label="Settings categories">
+    <button class="settings-tab active" role="tab" aria-selected="true" data-settings-tab="general">General</button>
+    <button class="settings-tab" role="tab" aria-selected="false" data-settings-tab="performance">Performance</button>
+    <button class="settings-tab" role="tab" aria-selected="false" data-settings-tab="advanced">Advanced</button>
+  </nav>
+
   <main>
-    <section class="settings-section">
+    <section class="settings-section" data-settings-panel="general">
       <h2>Appearance</h2>
       <label class="select-row" for="theme"><span>App appearance</span>
         <select id="theme" data-setting="theme"><option value="system">Use system setting</option><option value="light">Light</option><option value="dark">Dark</option></select>
       </label>
     </section>
 
-    <section class="settings-section">
+    <section class="settings-section" data-settings-panel="general">
       <h2>Search</h2>
       <label class="select-row" for="search-engine"><span>Search engine</span>
         <select id="search-engine" data-setting="searchEngine"><option value="google">Google</option><option value="duckduckgo">DuckDuckGo</option><option value="bing">Bing</option></select>
       </label>
     </section>
 
-    <section class="settings-section">
+    <section class="settings-section" data-settings-panel="general">
       <h2>Software Updates</h2>
       <div class="update-row">
         <div><strong id="app-version">Safari</strong><p id="update-status" class="section-note">Checking for updates when Safari starts.</p></div>
@@ -37,7 +43,7 @@
       <label class="toggle-row"><span><strong>Don't show update notices</strong><small>Safari will still check for updates each time it opens</small></span><input type="checkbox" data-setting="suppressUpdateNotices"></label>
     </section>
 
-    <section class="settings-section">
+    <section class="settings-section" data-settings-panel="advanced">
       <h2>Privacy &amp; Performance</h2>
       <label class="toggle-row"><span><strong>JavaScript</strong><small>Disable scripts in every tab</small></span><input type="checkbox" data-setting="javascriptEnabled"></label>
       <label class="toggle-row"><span><strong>uBlock Origin</strong><small>Filter ads and unwanted requests</small></span><input type="checkbox" data-setting="ublockEnabled"></label>
@@ -45,7 +51,24 @@
       <label class="toggle-row"><span><strong>Hardware acceleration</strong><small>Recommended for video and cloud gaming; restart required</small></span><input type="checkbox" data-setting="hardwareAcceleration"></label>
     </section>
 
-    <section class="settings-section">
+    <section class="settings-section" data-settings-panel="performance">
+      <h2>Performance</h2>
+      <p id="hardware-info" class="section-note">Checking device specifications...</p>
+      <label class="select-row" for="memory-budget"><span>RAM target</span>
+        <select id="memory-budget" data-setting="memoryBudgetGB"><option value="auto">Recommended for this device</option><option value="2">2 GB</option><option value="4">4 GB</option><option value="6">6 GB</option><option value="8">8 GB</option></select>
+      </label>
+      <label class="select-row" for="background-policy"><span>Background activity</span>
+        <select id="background-policy" data-setting="backgroundPolicy"><option value="balanced">Balanced</option><option value="conserve">Conserve memory and CPU</option></select>
+      </label>
+      <label class="select-row" for="suspend-minutes"><span>Hibernate inactive tabs after</span>
+        <select id="suspend-minutes" data-setting="backgroundSuspendMinutes"><option value="0">Only when over RAM target</option><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="20">20 minutes</option><option value="30">30 minutes</option></select>
+      </label>
+      <div class="data-actions"><button id="recommend-performance" class="secondary-button" type="button">Use recommended settings</button></div>
+      <p id="performance-readout" class="section-note" role="status" aria-live="polite">Sampling browser resource use...</p>
+      <p class="section-note">Targets are best-effort. When over the RAM target, Safari may hibernate background tabs; they reload when reopened, so unsaved page state can be lost. Electron cannot impose a hard CPU limit on active websites.</p>
+    </section>
+
+    <section class="settings-section" data-settings-panel="advanced">
       <h2>Cookies &amp; Cache</h2>
       <label class="toggle-row"><span><strong>Allow cookies</strong><small>Some sites require cookies to sign in or remember preferences</small></span><input type="checkbox" data-setting="cookiesEnabled"></label>
       <div class="data-actions">
@@ -55,7 +78,7 @@
       <p class="section-note">Clearing cookies signs you out of websites. Cache is used automatically and can be cleared here.</p>
     </section>
 
-    <section class="settings-section extensions-section">
+    <section class="settings-section extensions-section" data-settings-panel="advanced">
       <h2>Extensions</h2>
       <div class="data-actions">
         <button id="open-extension-store" class="secondary-button" type="button">Chrome Web Store</button>
@@ -65,12 +88,19 @@
       <div id="extension-list" class="extension-list"></div>
     </section>
 
-    <section class="settings-section default-section">
+    <section class="settings-section default-section" data-settings-panel="general">
       <div><h2>Default browser</h2><p id="default-status" class="section-note">Checking Windows settings...</p></div>
       <button id="default-button" class="secondary-button" type="button">Choose in Windows</button>
     </section>
 
-    <section class="settings-section passwords-section">
+    <section class="settings-section" data-settings-panel="advanced">
+      <h2>Advanced Controls</h2>
+      <label class="toggle-row"><span><strong>Scan downloads with Windows Defender</strong><small>Flag threats, risky file types, or files the scanner cannot verify</small></span><input type="checkbox" data-setting="downloadSafetyScanEnabled"></label>
+      <label class="toggle-row"><span><strong>Send Do Not Track and Global Privacy Control</strong><small>Ask websites not to track this browser</small></span><input type="checkbox" data-setting="sendPrivacyHeaders"></label>
+      <label class="toggle-row"><span><strong>Developer tools</strong><small>Show Chromium developer tools in the View menu</small></span><input type="checkbox" data-setting="developerToolsEnabled"></label>
+    </section>
+
+    <section class="settings-section passwords-section" data-settings-panel="advanced">
       <div class="password-heading"><div><h2>Passwords</h2><p class="section-note">Passwords are encrypted with your operating-system credentials on this device.</p></div>
         <button id="import-passwords" class="secondary-button" type="button">Import CSV</button>
       </div>
@@ -85,7 +115,7 @@
       <div id="password-list" class="password-list"></div>
     </section>
 
-    <section class="settings-section passkeys-section">
+    <section class="settings-section passkeys-section" data-settings-panel="advanced">
       <h2>Passkeys</h2>
       <p class="section-note">On supported HTTPS sites, passkeys use Chromium WebAuthn and Windows Hello or a security key. Create and manage them in the site's account settings; passkey private keys stay in the Windows credential provider.</p>
     </section>

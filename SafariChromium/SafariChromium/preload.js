@@ -8,6 +8,8 @@ contextBridge.exposeInMainWorld('browser', {
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     save: (updates) => ipcRenderer.invoke('settings:save', updates),
+    samplePerformance: () => ipcRenderer.invoke('performance:sample'),
+    recommendPerformance: () => ipcRenderer.invoke('performance:recommend'),
     checkUpdates: () => ipcRenderer.invoke('updates:check'),
     onUpdateStatus: (callback) => ipcRenderer.on('update-status', (_event, message) => callback(message)),
     setDefaultBrowser: () => ipcRenderer.invoke('settings:set-default-browser'),

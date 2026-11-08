@@ -5,10 +5,14 @@ const { app, BrowserWindow, WebContentsView, ipcMain, session, clipboard, Menu, 
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const os = require('os');
+const { execFile } = require('child_process');
+const { promisify } = require('util');
 const { fileURLToPath } = require('url');
 const { autoUpdater } = require('electron-updater');
 
 const CHROME_HEIGHT = 92;   // toolbar (52px) + tab strip (40px), must match styles.css
+const execFileAsync = promisify(execFile);
 const HOME_PAGE = 'safari://newtab';
 const SEARCH_ENGINES = {
   google: 'https://www.google.com/search?q=',
@@ -23,6 +27,12 @@ const SETTINGS_DEFAULTS = {
   ublockEnabled: true,
   cookiesEnabled: true,
   extraExtensions: [],
+  downloadSafetyScanEnabled: true,
+  memoryBudgetGB: 'auto',
+  backgroundPolicy: 'balanced',
+  backgroundSuspendMinutes: 10,
+  sendPrivacyHeaders: true,
+  developerToolsEnabled: true,
   suppressUpdateNotices: false,
   webAssemblyEnabled: true,
   hardwareAcceleration: true,
@@ -47,6 +57,7 @@ try {
 // Loaded uBlock Origin extension per session (null if it failed to load).
 const ublockIds = new WeakMap();
 const userExtensionIds = new WeakMap();
+const downloads = new Map();
 
 let blockerOn = true;
 let trackersBlocked = 0;
@@ -74,6 +85,9 @@ if (settings.theme === 'light' || settings.theme === 'dark' || settings.theme ==
 if (!Object.hasOwn(SEARCH_ENGINES, settings.searchEngine)) settings.searchEngine = 'google';
 if (!Array.isArray(settings.extraExtensions)) settings.extraExtensions = [];
 if (typeof settings.suppressUpdateNotices !== 'boolean') settings.suppressUpdateNotices = false;
+if (!['auto', 2, 4, 6, 8].includes(settings.memoryBudgetGB)) settings.memoryBudgetGB = 'auto';
+if (!['balanced', 'conserve'].includes(settings.backgroundPolicy)) settings.backgroundPolicy = 'balanced';
+if (![0, 5, 10, 20, 30].includes(settings.backgroundSuspendMinutes)) settings.backgroundSuspendMinutes = 10;
 if (settings.hardwareAcceleration === false) app.disableHardwareAcceleration();
 if (settings.webAssemblyEnabled === false) app.commandLine.appendSwitch('js-flags', '--no-expose-wasm');
 
@@ -227,15 +241,16 @@ function configureSession(ses) {
   if (settings.ublockEnabled) loadUBlock(ses);
   if (ses === session.defaultSession) loadUserExtensions(ses);
 
-  // Always ask sites not to track.
   ses.webRequest.onBeforeSendHeaders((details, callback) => {
     if (!settings.cookiesEnabled) {
       for (const name of Object.keys(details.requestHeaders)) {
         if (['cookie', 'cookie2'].includes(name.toLowerCase())) delete details.requestHeaders[name];
       }
     }
-    details.requestHeaders['DNT'] = '1';
-    details.requestHeaders['Sec-GPC'] = '1';
+    if (settings.sendPrivacyHeaders) {
+      details.requestHeaders['DNT'] = '1';
+      details.requestHeaders['Sec-GPC'] = '1';
+    }
     callback({ requestHeaders: details.requestHeaders });
   });
 
@@ -247,6 +262,216 @@ function configureSession(ses) {
     }
     callback({ responseHeaders });
   });
+
+  ses.on('will-download', (event, item, webContents) => {
+    handleDownload(ses, event, item, webContents);
+  });
+}
+
+const flaggedDownloadExtensions = new Set([
+  '.exe', '.msi', '.dll', '.scr', '.com', '.bat', '.cmd', '.ps1', '.psm1', '.vbs', '.vbe', '.js', '.jse', '.hta', '.lnk', '.reg', '.jar', '.chm', '.docm', '.xlsm', '.pptm',
+]);
+
+function downloadOwner(ses, webContents) {
+  const browser = [...windows].find((candidate) => candidate.ses === ses
+    && candidate.tabs.some((tab) => tab.view.webContents === webContents));
+  return {
+    window: browser ? browser.win : BrowserWindow.fromWebContents(webContents),
+    isPrivate: !!(browser && browser.isPrivate),
+  };
+}
+
+function downloadSnapshot(download, isPrivate) {
+  if (download.isPrivate !== isPrivate) return null;
+  return {
+    id: download.id,
+    filename: download.filename,
+    url: download.url,
+    status: download.status,
+    receivedBytes: download.receivedBytes,
+    totalBytes: download.totalBytes,
+    percent: download.totalBytes ? Math.floor(download.receivedBytes / download.totalBytes * 100) : 0,
+    scanStatus: download.scanStatus,
+    scanDetail: download.scanDetail,
+    sha256: download.sha256,
+    path: download.status === 'Complete' ? download.targetPath : '',
+  };
+}
+
+function publishDownloads() {
+  for (const browser of windows) push(browser);
+}
+
+function defenderCliPath() {
+  if (process.platform !== 'win32') return null;
+  const candidates = [];
+  if (process.env.ProgramFiles) candidates.push(path.join(process.env.ProgramFiles, 'Windows Defender', 'MpCmdRun.exe'));
+  if (process.env.ProgramData) {
+    const platformDirectory = path.join(process.env.ProgramData, 'Microsoft', 'Windows Defender', 'Platform');
+    try {
+      const versions = fs.readdirSync(platformDirectory).sort().reverse();
+      for (const version of versions) candidates.push(path.join(platformDirectory, version, 'MpCmdRun.exe'));
+    } catch (_) { /* Defender platform directory is optional */ }
+  }
+  return candidates.find((candidate) => fs.existsSync(candidate)) || null;
+}
+
+async function scanDownloadFile(filePath) {
+  if (!settings.downloadSafetyScanEnabled) return { status: 'disabled', detail: 'File scanning is disabled in Advanced settings.' };
+  const scanner = defenderCliPath();
+  if (!scanner) return { status: 'unavailable', detail: 'Windows Defender command-line scanner was not found.' };
+  try {
+    const result = await execFileAsync(scanner, ['-Scan', '-ScanType', '3', '-File', filePath, '-DisableRemediation'], {
+      timeout: 5 * 60 * 1000,
+      maxBuffer: 1024 * 1024,
+      windowsHide: true,
+    });
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+    if (/threat\s+(was\s+)?detected|malware\s+(was\s+)?detected|virus\s+(was\s+)?detected/i.test(output)) {
+      return { status: 'detected', detail: 'Windows Defender reported a threat.' };
+    }
+    return { status: 'clean', detail: 'Windows Defender completed a scan without reporting a threat.' };
+  } catch (err) {
+    const output = `${err.stdout || ''}\n${err.stderr || ''}`;
+    if (/threat\s+(was\s+)?detected|malware\s+(was\s+)?detected|virus\s+(was\s+)?detected/i.test(output)) {
+      return { status: 'detected', detail: 'Windows Defender reported a threat.' };
+    }
+    return { status: 'unverified', detail: `Windows Defender could not verify this file (${err.code || 'scan error'}).` };
+  }
+}
+
+async function hashFile(filePath) {
+  const digest = crypto.createHash('sha256');
+  for await (const chunk of fs.createReadStream(filePath)) digest.update(chunk);
+  return digest.digest('hex');
+}
+
+function moveQuarantinedFile(source, destination) {
+  try {
+    fs.renameSync(source, destination);
+  } catch (err) {
+    if (err.code !== 'EXDEV') throw err;
+    fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+    fs.unlinkSync(source);
+  }
+}
+
+async function finishDownload(download, state) {
+  if (state !== 'completed') {
+    download.status = state === 'cancelled' ? 'Canceled' : 'Interrupted';
+    try { if (download.tempPath) fs.rmSync(download.tempPath, { force: true }); } catch (_) { /* best effort */ }
+    publishDownloads();
+    return;
+  }
+
+  download.status = 'Scanning';
+  publishDownloads();
+  const scan = await scanDownloadFile(download.tempPath);
+  download.scanStatus = scan.status;
+  download.scanDetail = scan.detail;
+  try { download.sha256 = await hashFile(download.tempPath); }
+  catch (err) { download.scanStatus = 'unverified'; download.scanDetail = `Could not read the file for verification: ${err.message}`; }
+
+  const extension = path.extname(download.filename).toLowerCase();
+  const dangerousType = flaggedDownloadExtensions.has(extension);
+  const requiresConfirmation = scan.status !== 'clean' || dangerousType;
+  if (requiresConfirmation) {
+    const reason = scan.status === 'detected'
+      ? 'Windows Defender reported a threat.'
+      : scan.status === 'clean' && dangerousType
+        ? `This file type (${extension}) can run code or contain active content. The antivirus scan did not report a threat.`
+        : scan.detail;
+    download.status = 'Flagged';
+    download.scanDetail = reason;
+    publishDownloads();
+    const options = {
+      type: 'warning',
+      title: 'Review flagged download',
+      message: `Safari flagged ${download.filename}.`,
+      detail: `${reason}\n\nSHA-256: ${download.sha256 || 'unavailable'}\n\nKeep this file only if you trust its source.`,
+      buttons: ['Keep anyway', 'Delete'],
+      defaultId: 1,
+      cancelId: 1,
+    };
+    const result = download.window && !download.window.isDestroyed()
+      ? await dialog.showMessageBox(download.window, options)
+      : await dialog.showMessageBox(options);
+    if (result.response !== 0) {
+      try { fs.rmSync(download.tempPath, { force: true }); } catch (_) { /* best effort */ }
+      download.status = 'Deleted after warning';
+      publishDownloads();
+      return;
+    }
+  }
+
+  try {
+    moveQuarantinedFile(download.tempPath, download.targetPath);
+    download.status = 'Complete';
+  } catch (err) {
+    download.status = 'Could not save';
+    download.scanDetail = err.message;
+  }
+  publishDownloads();
+}
+
+async function handleDownload(ses, event, item, webContents) {
+  const owner = downloadOwner(ses, webContents);
+  const filename = path.basename(item.getFilename() || 'download');
+  const id = crypto.randomUUID();
+  const download = {
+    id,
+    filename,
+    url: item.getURL(),
+    status: 'Choose save location',
+    scanStatus: 'pending',
+    scanDetail: '',
+    receivedBytes: 0,
+    totalBytes: item.getTotalBytes(),
+    targetPath: '',
+    tempPath: '',
+    webContentsId: webContents.id,
+    item,
+    window: owner.window,
+    isPrivate: owner.isPrivate,
+  };
+  downloads.set(id, download);
+  download.tempPath = path.join(app.getPath('temp'), `safari-${id}.quarantine`);
+  item.setSavePath(download.tempPath);
+  item.pause();
+  publishDownloads();
+
+  item.on('updated', (_event, state) => {
+    download.receivedBytes = item.getReceivedBytes();
+    download.totalBytes = item.getTotalBytes();
+    download.status = state === 'interrupted' ? 'Interrupted' : 'Downloading';
+    publishDownloads();
+  });
+  item.once('done', (_event, state) => { finishDownload(download, state).catch((err) => {
+    download.status = 'Scan failed';
+    download.scanStatus = 'unverified';
+    download.scanDetail = err.message;
+    publishDownloads();
+  }); });
+
+  try {
+    const selection = await dialog.showSaveDialog(owner.window, {
+      title: 'Save download',
+      defaultPath: path.join(app.getPath('downloads'), filename),
+    });
+    if (selection.canceled || !selection.filePath) {
+      item.cancel();
+      return;
+    }
+    download.targetPath = selection.filePath;
+    download.status = 'Downloading';
+    item.resume();
+    publishDownloads();
+  } catch (err) {
+    item.cancel();
+    download.status = 'Canceled';
+    download.scanDetail = err.message;
+    publishDownloads();
+  }
 }
 
 // ---------- helpers ----------
@@ -383,14 +608,14 @@ function layout(w) {
   if (w.win.isDestroyed()) return;
   const [width, height] = w.win.getContentSize();
   const tab = activeTab(w);
-  if (tab) {
+  if (tab && tab.view) {
     tab.view.setBounds({ x: 0, y: CHROME_HEIGHT, width, height: Math.max(0, height - CHROME_HEIGHT) });
   }
 }
 
 // ---------- tabs ----------
 function createTab(w, url, activateNow = true) {
-  const tab = { id: nextTabId++, view: null, title: 'New Tab', url: '', favicon: '', loading: false, groupId: null };
+  const tab = { id: nextTabId++, view: null, title: 'New Tab', url: '', favicon: '', loading: false, groupId: null, lastActivatedAt: Date.now(), hibernated: false };
   w.tabs.push(tab);
   attachTabView(w, tab);
 
@@ -445,7 +670,7 @@ function attachTabView(w, tab) {
 
 function reloadTabWithSettings(w, tab) {
   const index = w.tabs.indexOf(tab);
-  if (index < 0) return;
+  if (index < 0 || tab.hibernated) return;
   const wasActive = w.activeId === tab.id;
   const oldView = tab.view;
   const replacement = { ...tab, view: null, loading: false };
@@ -468,11 +693,75 @@ function activate(w, id) {
 
   const tab = w.tabs.find((t) => t.id === id);
   if (!tab) return;
+  if (tab.hibernated) {
+    tab.hibernated = false;
+    attachTabView(w, tab);
+    loadTabURL(tab, normalizeInput(tab.url || HOME_PAGE));
+  }
   w.activeId = id;
+  tab.lastActivatedAt = Date.now();
   w.win.contentView.addChildView(tab.view);
   layout(w);
   push(w);
   tab.view.webContents.focus();
+}
+
+function hibernateTab(w, tab) {
+  if (!tab || tab.id === w.activeId || !tab.view || tab.view.webContents.isCurrentlyAudible()) return false;
+  const view = tab.view;
+  tab.view = null;
+  tab.hibernated = true;
+  safe(() => view.webContents.close());
+  push(w);
+  return true;
+}
+
+function recommendedPerformance() {
+  const memoryGB = os.totalmem() / (1024 ** 3);
+  const cpuCores = os.cpus().length;
+  if (memoryGB < 8 || cpuCores < 4) {
+    return { memoryBudgetGB: 2, backgroundPolicy: 'conserve', backgroundSuspendMinutes: 5, memoryGB: Math.round(memoryGB * 10) / 10, cpuCores };
+  }
+  if (memoryGB < 16 || cpuCores < 8) {
+    return { memoryBudgetGB: 4, backgroundPolicy: 'balanced', backgroundSuspendMinutes: 10, memoryGB: Math.round(memoryGB * 10) / 10, cpuCores };
+  }
+  return { memoryBudgetGB: 8, backgroundPolicy: 'balanced', backgroundSuspendMinutes: 20, memoryGB: Math.round(memoryGB * 10) / 10, cpuCores };
+}
+
+function performanceSnapshot() {
+  const metrics = app.getAppMetrics();
+  const workingSetBytes = metrics.reduce((total, metric) => total + (metric.memory.workingSetSize || 0), 0);
+  const cpuPercent = metrics.reduce((total, metric) => total + (metric.cpu.percentCPUUsage || 0), 0);
+  return {
+    memoryMB: Math.round(workingSetBytes / (1024 ** 2)),
+    cpuPercent: Math.round(cpuPercent * 10) / 10,
+    ...recommendedPerformance(),
+  };
+}
+
+function backgroundDownloadActive(tab) {
+  if (!tab || !tab.view) return false;
+  const webContentsId = tab.view.webContents.id;
+  return [...downloads.values()].some((download) => download.webContentsId === webContentsId
+    && ['Downloading', 'Choose save location', 'Scanning'].includes(download.status));
+}
+
+function enforcePerformanceSettings() {
+  const metrics = performanceSnapshot();
+  const budgetGB = settings.memoryBudgetGB === 'auto'
+    ? recommendedPerformance().memoryBudgetGB
+    : Number(settings.memoryBudgetGB);
+  const overBudget = metrics.memoryMB > budgetGB * 1024;
+  const idleLimit = settings.backgroundPolicy === 'conserve'
+    ? settings.backgroundSuspendMinutes * 60 * 1000
+    : 0;
+  const now = Date.now();
+  const candidates = [...windows].flatMap((w) => w.tabs
+    .filter((tab) => tab.id !== w.activeId && tab.view && !backgroundDownloadActive(tab)
+      && (overBudget || (idleLimit > 0 && now - tab.lastActivatedAt >= idleLimit)))
+    .map((tab) => ({ w, tab })));
+  candidates.sort((a, b) => a.tab.lastActivatedAt - b.tab.lastActivatedAt);
+  if (candidates.length) hibernateTab(candidates[0].w, candidates[0].tab);
 }
 
 function closeTab(w, id) {
@@ -480,11 +769,11 @@ function closeTab(w, id) {
   if (index === -1) return;
   const [tab] = w.tabs.splice(index, 1);
   const wasActive = w.activeId === id;
-  if (wasActive) {
+  if (wasActive && tab.view) {
     w.win.contentView.removeChildView(tab.view);
     w.activeId = null;
   }
-  safe(() => tab.view.webContents.close());
+  safe(() => tab.view && tab.view.webContents.close());
   regroup(w);
 
   if (wasActive) {
@@ -802,11 +1091,14 @@ function push(w) {
     canForward: wc ? safe(() => navOf(wc).canGoForward(), false) : false,
     groups: w.groups,
     isBookmarked: !!(tab && bookmarks.some((bookmark) => bookmark.url === tab.url)),
+    downloads: [...downloads.values()]
+      .filter((download) => download.isPrivate === w.isPrivate)
+      .map((download) => downloadSnapshot(download, w.isPrivate)),
     trackersBlocked,
     blockerOn,
     theme: settings.theme,
     tabs: w.tabs.map((t) => ({
-      id: t.id, title: t.title, favicon: t.favicon, loading: t.loading, groupId: t.groupId,
+      id: t.id, title: t.title, favicon: t.favicon, loading: t.loading, groupId: t.groupId, hibernated: !!t.hibernated,
     })),
   };
   lastBlockedSent = trackersBlocked;
@@ -964,7 +1256,7 @@ function menuTemplate(w) {
         { label: 'Show Previous Tab', accelerator: 'Ctrl+Shift+Tab', click: () => cycleTab(w, -1) },
         { type: 'separator' },
         { role: 'togglefullscreen' },
-        { label: 'Developer Tools', accelerator: 'CmdOrCtrl+Alt+I', click: () => wc && wc.toggleDevTools() },
+        ...(settings.developerToolsEnabled ? [{ label: 'Developer Tools', accelerator: 'CmdOrCtrl+Alt+I', click: () => wc && wc.toggleDevTools() }] : []),
       ],
     },
   ];
@@ -1028,6 +1320,7 @@ ipcMain.handle('settings:get', (event) => {
     ...publicSettings,
     appVersion: app.getVersion(),
     electronVersion: process.versions.electron,
+    hardwareInfo: { memoryGB: Math.round(os.totalmem() / (1024 ** 3) * 10) / 10, cpuCores: os.cpus().length },
     updateStatus,
     defaultBrowser: process.platform === 'win32' && isDefaultWebProtocol('http'),
     secureStorageAvailable: isVaultEncryptionAvailable(),
@@ -1045,9 +1338,12 @@ ipcMain.handle('settings:save', (event, updates = {}) => {
   const previous = { ...settings };
   if (['system', 'light', 'dark'].includes(updates.theme)) settings.theme = updates.theme;
   if (Object.hasOwn(SEARCH_ENGINES, updates.searchEngine)) settings.searchEngine = updates.searchEngine;
-  for (const key of ['javascriptEnabled', 'ublockEnabled', 'cookiesEnabled', 'webAssemblyEnabled', 'hardwareAcceleration', 'suppressUpdateNotices']) {
+  for (const key of ['javascriptEnabled', 'ublockEnabled', 'cookiesEnabled', 'webAssemblyEnabled', 'hardwareAcceleration', 'suppressUpdateNotices', 'sendPrivacyHeaders', 'developerToolsEnabled', 'downloadSafetyScanEnabled']) {
     if (typeof updates[key] === 'boolean') settings[key] = updates[key];
   }
+  if (['auto', 2, 4, 6, 8].includes(updates.memoryBudgetGB)) settings.memoryBudgetGB = updates.memoryBudgetGB;
+  if (['balanced', 'conserve'].includes(updates.backgroundPolicy)) settings.backgroundPolicy = updates.backgroundPolicy;
+  if ([0, 5, 10, 20, 30].includes(updates.backgroundSuspendMinutes)) settings.backgroundSuspendMinutes = updates.backgroundSuspendMinutes;
   const saved = saveSettings();
   if (!saved) {
     settings = previous;
@@ -1075,6 +1371,29 @@ ipcMain.handle('settings:save', (event, updates = {}) => {
     restartRequired: previous.webAssemblyEnabled !== settings.webAssemblyEnabled
       || previous.hardwareAcceleration !== settings.hardwareAcceleration,
   };
+});
+
+ipcMain.handle('performance:sample', (event) => {
+  if (!isSettingsSender(event.sender)) return { ok: false };
+  return {
+    ok: true,
+    ...performanceSnapshot(),
+    targetGB: settings.memoryBudgetGB === 'auto' ? recommendedPerformance().memoryBudgetGB : settings.memoryBudgetGB,
+  };
+});
+
+ipcMain.handle('performance:recommend', (event) => {
+  if (!isSettingsSender(event.sender)) return { ok: false, error: 'Not allowed.' };
+  const previous = { memoryBudgetGB: settings.memoryBudgetGB, backgroundPolicy: settings.backgroundPolicy, backgroundSuspendMinutes: settings.backgroundSuspendMinutes };
+  const recommendation = recommendedPerformance();
+  settings.memoryBudgetGB = recommendation.memoryBudgetGB;
+  settings.backgroundPolicy = recommendation.backgroundPolicy;
+  settings.backgroundSuspendMinutes = recommendation.backgroundSuspendMinutes;
+  if (!saveSettings()) {
+    Object.assign(settings, previous);
+    return { ok: false, error: 'Could not save recommended settings.' };
+  }
+  return { ok: true, recommendation };
 });
 
 ipcMain.handle('settings:set-default-browser', async (event) => {
@@ -1253,6 +1572,28 @@ ipcMain.on('cmd', (event, name, p = {}) => {
     case 'passwords:menu': showPasswordsMenu(w, p.x, p.y); break;
     case 'extensions:menu': showExtensionsMenu(w, p.x, p.y); break;
     case 'extensions:store': createTab(w, 'https://chromewebstore.google.com/'); break;
+    case 'download:cancel': {
+      const item = downloads.get(p.id);
+      if (item && item.isPrivate === w.isPrivate && item.item) item.item.cancel();
+      break;
+    }
+    case 'download:open': {
+      const item = downloads.get(p.id);
+      if (item && item.isPrivate === w.isPrivate && item.status === 'Complete') shell.openPath(item.targetPath);
+      break;
+    }
+    case 'download:show': {
+      const item = downloads.get(p.id);
+      if (item && item.isPrivate === w.isPrivate && item.status === 'Complete') shell.showItemInFolder(item.targetPath);
+      break;
+    }
+    case 'download:clear': {
+      for (const [id, item] of downloads) {
+        if (item.isPrivate === w.isPrivate && !['Downloading', 'Scanning', 'Choose save location'].includes(item.status)) downloads.delete(id);
+      }
+      windows.forEach(push);
+      break;
+    }
     case 'group:new-active': { const tab = activeTab(w); newGroup(w, tab && tab.id); break; }
     case 'open-settings': openSettings(w); break;
     case 'tab:select': activate(w, p.id); break;
@@ -1382,6 +1723,8 @@ function setupAutoUpdater() {
 setInterval(() => {
   if (trackersBlocked !== lastBlockedSent) windows.forEach(push);
 }, 1000);
+
+setInterval(enforcePerformanceSettings, 30000);
 
 // ---------- app lifecycle ----------
 app.whenReady().then(() => {
