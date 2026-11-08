@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; form-action https://www.google.com https://duckduckgo.com https://www.bing.com">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Start Page</title>
+  <link rel="icon" href="../assets/safari-night.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="start.css">
+</head>
+<body>
+  <main class="start-page">
+    <header class="brand">
+      <img src="../assets/safari-night.svg" alt="">
+      <span>Safari</span>
+    </header>
+
+    <section class="welcome" aria-labelledby="welcome-title">
+      <p class="eyebrow">A fresh page</p>
+      <h1 id="welcome-title">Where to?</h1>
+      <form id="search-form" class="search" method="get">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="8.5" cy="8.5" r="5.5"/><path d="m13 13 4 4"/></svg>
+        <input id="search" name="q" type="search" placeholder="Search the web" autofocus autocomplete="off" aria-label="Search the web">
+        <span id="engine-label" class="engine-label">Google</span>
+      </form>
+    </section>
+
+    <section class="favorites" aria-labelledby="favorites-title">
+      <div class="section-heading">
+        <h2 id="favorites-title">Favorites</h2>
+        <span>Quick access</span>
+      </div>
+      <div class="favorite-grid">
+        <a class="favorite" href="https://www.google.com">
+          <span class="favorite-mark google">G</span><span>Google</span>
+        </a>
+        <a class="favorite" href="https://www.youtube.com">
+          <span class="favorite-mark youtube">▶</span><span>YouTube</span>
+        </a>
+        <a class="favorite" href="https://www.reddit.com">
+          <span class="favorite-mark reddit">r</span><span>Reddit</span>
+        </a>
+        <a class="favorite" href="https://github.com">
+          <span class="favorite-mark github">⌘</span><span>GitHub</span>
+        </a>
+        <a class="favorite" href="https://www.xbox.com/play">
+          <span class="favorite-mark xbox">X</span><span>Xbox Cloud</span>
+        </a>
+        <a class="favorite" href="https://play.geforcenow.com">
+          <span class="favorite-mark geforce">N</span><span>GeForce NOW</span>
+        </a>
+      </div>
+    </section>
+
+    <footer class="start-footer">
+      <span>Safari for Windows</span>
+      <span class="footer-mark"><img src="../assets/safari-night.svg" alt=""></span>
+    </footer>
+  </main>
+  <script src="start.js"></script>
+</body>
+</html>

@@ -8,15 +8,29 @@
   "license": "MIT",
   "scripts": {
     "start": "electron .",
-    "build": "electron-builder --win"
+    "build": "electron-builder --win",
+    "build:icon": "node tools/generate-icon.js"
   },
   "devDependencies": {
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
   },
   "build": {
-    "appId": "com.example.safari-chromium",
+    "appId": "com.safari.chromium",
     "productName": "Safari",
+    "protocols": [
+      { "name": "HTTP", "schemes": ["http"] },
+      { "name": "HTTPS", "schemes": ["https"] }
+    ],
+    "fileAssociations": [
+      {
+        "ext": ["html", "htm"],
+        "name": "Safari HTML document",
+        "description": "HTML document opened in Safari",
+        "role": "Viewer",
+        "icon": "assets/safari.ico"
+      }
+    ],
     "files": [
       "**/*",
       "!dist/**",
@@ -26,6 +40,7 @@
       "extensions/**"
     ],
     "win": {
+      "icon": "assets/safari.ico",
       "target": [
         "nsis",
         "portable"
@@ -33,7 +48,10 @@
     },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Safari"
     }
   }
 }

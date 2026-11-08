@@ -11,7 +11,20 @@
   --tab: #e4e4e7;
   --tab-active: #ffffff;
   --hover: rgba(0, 0, 0, 0.07);
-  color-scheme: light dark;
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  --bar: #2a2a2c;
+  --bar-2: #1f1f21;
+  --field: #3a3a3c;
+  --text: #f5f5f7;
+  --muted: #a1a1a6;
+  --border: #48484a;
+  --tab: #1c1c1e;
+  --tab-active: #3a3a3c;
+  --hover: rgba(255, 255, 255, 0.1);
+  color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
@@ -25,6 +38,7 @@
     --tab: #1c1c1e;
     --tab-active: #3a3a3c;
     --hover: rgba(255, 255, 255, 0.1);
+    color-scheme: dark;
   }
 }
 

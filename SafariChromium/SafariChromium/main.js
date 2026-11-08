@@ -1,14 +1,28 @@
 // Safari (Chromium) - main process.
 // Each window hosts its own Chromium tabs (WebContentsView), tab groups and
 // a privacy layer (tracker blocking, Do Not Track / GPC headers).
-const { app, BrowserWindow, WebContentsView, ipcMain, session, clipboard, Menu } = require('electron');
+const { app, BrowserWindow, WebContentsView, ipcMain, session, clipboard, Menu, dialog, safeStorage, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
+const { fileURLToPath } = require('url');
 
 const CHROME_HEIGHT = 92;   // toolbar (52px) + tab strip (40px), must match styles.css
-const HOME_PAGE = 'https://duckduckgo.com/';
-const SEARCH_URL = 'https://duckduckgo.com/?q=';
+const HOME_PAGE = 'safari://newtab';
+const SEARCH_ENGINES = {
+  google: 'https://www.google.com/search?q=',
+  duckduckgo: 'https://duckduckgo.com/?q=',
+  bing: 'https://www.bing.com/search?q=',
+};
 const GROUP_COLORS = ['#ff453a', '#ff9f0a', '#ffd60a', '#32d74b', '#64d2ff', '#0a84ff', '#bf5af2', '#ff375f'];
+const SETTINGS_DEFAULTS = {
+  theme: 'system',
+  searchEngine: 'google',
+  javascriptEnabled: true,
+  ublockEnabled: true,
+  webAssemblyEnabled: true,
+  hardwareAcceleration: true,
+};
 
 // Packaged apps keep files in app.asar, but Chromium can only load extensions
 // from real folders, so use the unpacked copy when running from an installer.
@@ -35,7 +49,36 @@ let lastBlockedSent = -1;
 let nextTabId = 1;
 let nextGroupId = 1;
 const windows = new Set();
+const settingsWindows = new Set();
 const configuredSessions = new WeakSet();
+
+const settingsFile = path.join(app.getPath('userData'), 'settings.json');
+let settings = { ...SETTINGS_DEFAULTS };
+try {
+  const saved = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+  settings = { ...settings, ...saved };
+} catch (_) { /* first run */ }
+if (settings.theme === 'light' || settings.theme === 'dark' || settings.theme === 'system') {
+  // Keep the saved theme selection.
+} else {
+  settings.theme = SETTINGS_DEFAULTS.theme;
+}
+if (!Object.hasOwn(SEARCH_ENGINES, settings.searchEngine)) settings.searchEngine = 'google';
+if (settings.hardwareAcceleration === false) app.disableHardwareAcceleration();
+if (settings.webAssemblyEnabled === false) app.commandLine.appendSwitch('js-flags', '--no-expose-wasm');
+
+const vaultFile = path.join(app.getPath('userData'), 'passwords.enc');
+
+function saveSettings() {
+  try {
+    fs.mkdirSync(path.dirname(settingsFile), { recursive: true });
+    fs.writeFileSync(settingsFile, JSON.stringify(settings, null, 2));
+    return true;
+  } catch (err) {
+    console.warn('Could not save settings:', err && err.message);
+    return false;
+  }
+}
 
 // ---------- history (normal windows only) ----------
 const historyFile = path.join(app.getPath('userData'), 'history.json');
@@ -84,6 +127,7 @@ function isTracker(details) {
 
 // Loads the bundled uBlock Origin extension into a session (best effort).
 async function loadUBlock(ses) {
+  if (!settings.ublockEnabled || ublockIds.has(ses)) return;
   try {
     const loader = ses.extensions && ses.extensions.loadExtension
       ? ses.extensions
@@ -92,6 +136,17 @@ async function loadUBlock(ses) {
     ublockIds.set(ses, ext.id);
   } catch (err) {
     console.warn('uBlock Origin extension did not load:', err && err.message);
+  }
+}
+
+function removeUBlock(ses) {
+  const id = ublockIds.get(ses);
+  if (!id) return;
+  try {
+    ses.extensions.removeExtension(id);
+    ublockIds.delete(ses);
+  } catch (err) {
+    console.warn('uBlock Origin could not be disabled:', err && err.message);
   }
 }
 
@@ -112,7 +167,7 @@ function configureSession(ses) {
     callback({ cancel: false });
   });
 
-  loadUBlock(ses);
+  if (settings.ublockEnabled) loadUBlock(ses);
 
   // Always ask sites not to track.
   ses.webRequest.onBeforeSendHeaders((details, callback) => {
@@ -143,9 +198,24 @@ function normalizeInput(input) {
   const text = (input || '').trim();
   if (!text) return HOME_PAGE;
   if (/^(https?|chrome-extension):\/\//i.test(text)) return text;
+  if (/^safari:\/\/newtab$/i.test(text)) return HOME_PAGE;
   if (/^[^\s/]+\.[a-z]{2,}(:\d+)?(\/\S*)?$/i.test(text)) return `https://${text}`;
   if (/^localhost(:\d+)?(\/\S*)?$/i.test(text)) return `http://${text}`;
-  return SEARCH_URL + encodeURIComponent(text);
+  return SEARCH_ENGINES[settings.searchEngine] + encodeURIComponent(text);
+}
+
+function loadTabURL(tab, url) {
+  const wc = tab.view.webContents;
+  if (url === HOME_PAGE) {
+    tab.isStartPage = true;
+    tab.url = HOME_PAGE;
+    wc.loadFile(path.join(__dirname, 'ui', 'start.html'), {
+      query: { theme: settings.theme, search: settings.searchEngine },
+    }).catch(() => {});
+    return;
+  }
+  tab.isStartPage = false;
+  wc.loadURL(url).catch(() => {});
 }
 
 // ---------- windows & layout ----------
@@ -159,7 +229,8 @@ function createWindow({ isPrivate = false, url } = {}) {
     minWidth: 640,
     minHeight: 420,
     frame: false,
-    backgroundColor: isPrivate ? '#1f1f24' : '#f6f6f6',
+    icon: path.join(__dirname, 'assets', 'safari.ico'),
+    backgroundColor: isPrivate || settings.theme === 'dark' ? '#1f1f24' : '#f6f6f6',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -206,12 +277,27 @@ function layout(w) {
 
 // ---------- tabs ----------
 function createTab(w, url, activateNow = true) {
-  const view = new WebContentsView({
-    webPreferences: { session: w.ses, contextIsolation: true, sandbox: true },
-  });
-  const tab = { id: nextTabId++, view, title: 'New Tab', url: '', favicon: '', loading: false, groupId: null };
+  const tab = { id: nextTabId++, view: null, title: 'New Tab', url: '', favicon: '', loading: false, groupId: null };
   w.tabs.push(tab);
-  const wc = view.webContents;
+  attachTabView(w, tab);
+
+  if (activateNow) activate(w, tab.id);
+  else push(w);
+  loadTabURL(tab, normalizeInput(url));
+  return tab;
+}
+
+function attachTabView(w, tab) {
+  tab.view = new WebContentsView({
+    webPreferences: {
+      session: w.ses,
+      contextIsolation: true,
+      sandbox: true,
+      javascript: settings.javascriptEnabled,
+      backgroundThrottling: true,
+    },
+  });
+  const wc = tab.view.webContents;
 
   // Links that try to open a new window open a new tab instead.
   wc.setWindowOpenHandler(({ url: target }) => {
@@ -226,14 +312,34 @@ function createTab(w, url, activateNow = true) {
     if (!w.isPrivate && /^https?:/i.test(tab.url)) recordHistory(tab.url, tab.title);
     push(w);
   });
-  const onNavigate = (_e, newUrl) => { tab.url = newUrl; push(w); };
+  const startPagePath = path.join(__dirname, 'ui', 'start.html');
+  const onNavigate = (_e, newUrl) => {
+    let isStartPage = false;
+    try { isStartPage = fileURLToPath(newUrl) === startPagePath; } catch (_) { /* external URL */ }
+    tab.isStartPage = isStartPage;
+    tab.url = tab.isStartPage ? HOME_PAGE : newUrl;
+    push(w);
+  };
   wc.on('did-navigate', onNavigate);
   wc.on('did-navigate-in-page', onNavigate);
+}
 
-  if (activateNow) activate(w, tab.id);
-  else push(w);
-  wc.loadURL(normalizeInput(url)).catch(() => {});
-  return tab;
+function reloadTabWithSettings(w, tab) {
+  const index = w.tabs.indexOf(tab);
+  if (index < 0) return;
+  const wasActive = w.activeId === tab.id;
+  const oldView = tab.view;
+  const replacement = { ...tab, view: null, loading: false };
+  if (wasActive) w.win.contentView.removeChildView(oldView);
+  safe(() => oldView.webContents.close());
+  w.tabs[index] = replacement;
+  attachTabView(w, replacement);
+  if (wasActive) {
+    w.win.contentView.addChildView(replacement.view);
+    layout(w);
+  }
+  loadTabURL(replacement, normalizeInput(tab.url || HOME_PAGE));
+  push(w);
 }
 
 function activate(w, id) {
@@ -283,7 +389,7 @@ function navigate(w, action, value) {
   if (!tab) return;
   const wc = tab.view.webContents;
   switch (action) {
-    case 'go': wc.loadURL(normalizeInput(value)).catch(() => {}); break;
+    case 'go': loadTabURL(tab, normalizeInput(value)); break;
     case 'back': if (navOf(wc).canGoBack()) navOf(wc).goBack(); break;
     case 'forward': if (navOf(wc).canGoForward()) navOf(wc).goForward(); break;
     case 'reload': wc.reload(); break;
@@ -332,6 +438,123 @@ function renameGroup(w, id, name) {
   push(w);
 }
 
+let settingsWindow = null;
+
+function openSettings(w) {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus();
+    return;
+  }
+  settingsWindow = new BrowserWindow({
+    width: 820,
+    height: 760,
+    minWidth: 620,
+    minHeight: 560,
+    title: 'Safari Settings',
+    parent: w && !w.win.isDestroyed() ? w.win : undefined,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  settingsWindows.add(settingsWindow);
+  settingsWindow.setMenuBarVisibility(false);
+  settingsWindow.on('closed', () => {
+    settingsWindows.delete(settingsWindow);
+    settingsWindow = null;
+  });
+  settingsWindow.loadFile(path.join(__dirname, 'ui', 'settings.html'));
+}
+
+function isSettingsSender(sender) {
+  return [...settingsWindows].some((win) => !win.isDestroyed() && win.webContents === sender);
+}
+
+function setDefaultWebProtocols() {
+  if (app.isPackaged) {
+    app.setAsDefaultProtocolClient('http');
+    app.setAsDefaultProtocolClient('https');
+    return;
+  }
+  const projectPath = path.resolve(process.argv[1] || '.');
+  app.setAsDefaultProtocolClient('http', process.execPath, [projectPath]);
+  app.setAsDefaultProtocolClient('https', process.execPath, [projectPath]);
+}
+
+function isDefaultWebProtocol(protocol) {
+  if (app.isPackaged) return app.isDefaultProtocolClient(protocol);
+  return app.isDefaultProtocolClient(protocol, process.execPath, [path.resolve(process.argv[1] || '.')]);
+}
+
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let quoted = false;
+  for (let index = 0; index < text.length; index++) {
+    const char = text[index];
+    if (quoted) {
+      if (char === '"' && text[index + 1] === '"') { field += '"'; index++; }
+      else if (char === '"') quoted = false;
+      else field += char;
+    } else if (char === '"') {
+      quoted = true;
+    } else if (char === ',') {
+      row.push(field);
+      field = '';
+    } else if (char === '\n') {
+      row.push(field.replace(/\r$/, ''));
+      if (row.some((cell) => cell)) rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += char;
+    }
+  }
+  row.push(field.replace(/\r$/, ''));
+  if (row.some((cell) => cell)) rows.push(row);
+  if (!rows.length) return [];
+
+  const headers = rows.shift().map((header) => header.replace(/^\uFEFF/, '').trim().toLowerCase());
+  const column = (...names) => headers.findIndex((header) => names.includes(header));
+  const urlColumn = column('url', 'website');
+  const usernameColumn = column('username', 'user name');
+  const passwordColumn = column('password');
+  const nameColumn = column('name', 'title');
+  if (urlColumn < 0 || usernameColumn < 0 || passwordColumn < 0) return [];
+
+  return rows.map((cells) => ({
+    id: crypto.randomUUID(),
+    name: (cells[nameColumn] || '').trim(),
+    url: (cells[urlColumn] || '').trim(),
+    username: (cells[usernameColumn] || '').trim(),
+    password: cells[passwordColumn] || '',
+  })).filter((entry) => {
+    try { return ['http:', 'https:'].includes(new URL(entry.url).protocol) && !!entry.password; }
+    catch (_) { return false; }
+  });
+}
+
+function readPasswordVault() {
+  if (!isVaultEncryptionAvailable()) throw new Error('OS-backed encryption is unavailable. Set up a system keychain/keyring to use the password vault.');
+  if (!fs.existsSync(vaultFile)) return [];
+  return JSON.parse(safeStorage.decryptString(fs.readFileSync(vaultFile)));
+}
+
+function writePasswordVault(entries) {
+  if (!isVaultEncryptionAvailable()) throw new Error('OS-backed encryption is unavailable. Set up a system keychain/keyring to use the password vault.');
+  fs.mkdirSync(path.dirname(vaultFile), { recursive: true });
+  fs.writeFileSync(vaultFile, safeStorage.encryptString(JSON.stringify(entries)), { mode: 0o600 });
+}
+
+function isVaultEncryptionAvailable() {
+  if (!safeStorage.isEncryptionAvailable()) return false;
+  if (process.platform !== 'linux') return true;
+  const backend = safe(() => safeStorage.getSelectedStorageBackend(), 'unknown');
+  return backend !== 'basic_text' && backend !== 'unknown';
+}
+
 // ---------- state & menus ----------
 function push(w) {
   if (w.win.isDestroyed()) return;
@@ -348,6 +571,7 @@ function push(w) {
     groups: w.groups,
     trackersBlocked,
     blockerOn,
+    theme: settings.theme,
     tabs: w.tabs.map((t) => ({
       id: t.id, title: t.title, favicon: t.favicon, loading: t.loading, groupId: t.groupId,
     })),
@@ -464,6 +688,7 @@ function dotsTemplate(w) {
     { label: 'New Tab', click: () => createTab(w, HOME_PAGE) },
     { label: 'New Private Window', click: () => createWindow({ isPrivate: true }) },
     { type: 'separator' },
+    { label: 'Settings...', click: () => openSettings(w) },
     { label: 'Tab Groups', submenu: tabGroupItems(w) },
     { label: 'Privacy', submenu: privacyItems(w) },
     { type: 'separator' },
@@ -488,12 +713,142 @@ function showDotsMenu(w, x, y) {
   });
 }
 
+ipcMain.handle('settings:get', (event) => {
+  if (!isSettingsSender(event.sender)) return null;
+  return {
+    ...settings,
+    defaultBrowser: process.platform === 'win32' && isDefaultWebProtocol('http'),
+    secureStorageAvailable: isVaultEncryptionAvailable(),
+  };
+});
+
+ipcMain.handle('settings:save', (event, updates = {}) => {
+  if (!isSettingsSender(event.sender)) return { ok: false };
+  const previous = { ...settings };
+  if (['system', 'light', 'dark'].includes(updates.theme)) settings.theme = updates.theme;
+  if (Object.hasOwn(SEARCH_ENGINES, updates.searchEngine)) settings.searchEngine = updates.searchEngine;
+  for (const key of ['javascriptEnabled', 'ublockEnabled', 'webAssemblyEnabled', 'hardwareAcceleration']) {
+    if (typeof updates[key] === 'boolean') settings[key] = updates[key];
+  }
+  const saved = saveSettings();
+  if (!saved) {
+    settings = previous;
+    return { ok: false, saved: false };
+  }
+
+  if (previous.javascriptEnabled !== settings.javascriptEnabled) {
+    windows.forEach((browserWindow) => browserWindow.tabs.slice().forEach((tab) => {
+      reloadTabWithSettings(browserWindow, tab);
+    }));
+  }
+  if (previous.ublockEnabled !== settings.ublockEnabled) {
+    const sessions = new Set([...windows].map((browserWindow) => browserWindow.ses));
+    sessions.forEach((ses) => settings.ublockEnabled ? loadUBlock(ses) : removeUBlock(ses));
+  }
+  if (previous.theme !== settings.theme) {
+    windows.forEach((browserWindow) => browserWindow.tabs.forEach((tab) => {
+      if (tab.isStartPage) loadTabURL(tab, HOME_PAGE);
+    }));
+  }
+  windows.forEach(push);
+  return {
+    ok: saved,
+    saved,
+    restartRequired: previous.webAssemblyEnabled !== settings.webAssemblyEnabled
+      || previous.hardwareAcceleration !== settings.hardwareAcceleration,
+  };
+});
+
+ipcMain.handle('settings:set-default-browser', async (event) => {
+  if (!isSettingsSender(event.sender) || process.platform !== 'win32') return { ok: false };
+  setDefaultWebProtocols();
+  await shell.openExternal('ms-settings:defaultapps');
+  return { ok: true };
+});
+
+ipcMain.handle('passwords:list', (event) => {
+  if (!isSettingsSender(event.sender)) return [];
+  try {
+    return readPasswordVault().map(({ id, name, url, username }) => ({ id, name, url, username }));
+  } catch (err) {
+    return { error: err.message };
+  }
+});
+
+ipcMain.handle('passwords:import', async (event) => {
+  if (!isSettingsSender(event.sender)) return { ok: false, error: 'Not allowed.' };
+  if (!isVaultEncryptionAvailable()) return { ok: false, error: 'OS-backed encryption is unavailable. Set up a system keychain/keyring to use the password vault.' };
+  const owner = BrowserWindow.fromWebContents(event.sender);
+  const selection = await dialog.showOpenDialog(owner, {
+    title: 'Import passwords',
+    properties: ['openFile'],
+    filters: [{ name: 'CSV password export', extensions: ['csv'] }],
+  });
+  if (selection.canceled || !selection.filePaths[0]) return { ok: false, canceled: true };
+  try {
+    const imported = parseCSV(fs.readFileSync(selection.filePaths[0], 'utf8'));
+    if (!imported.length) return { ok: false, error: 'No supported password rows were found in that CSV.' };
+    const existing = readPasswordVault();
+    const keys = new Set(existing.map((entry) => `${entry.url}\n${entry.username}`));
+    const additions = imported.filter((entry) => !keys.has(`${entry.url}\n${entry.username}`));
+    writePasswordVault([...existing, ...additions]);
+    return { ok: true, imported: additions.length, skipped: imported.length - additions.length };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('passwords:add', (event, entry = {}) => {
+  if (!isSettingsSender(event.sender)) return { ok: false };
+  const url = String(entry.url || '').trim().slice(0, 2048);
+  const username = String(entry.username || '').trim().slice(0, 512);
+  const password = String(entry.password || '').slice(0, 4096);
+  if (!url || !username || !password) return { ok: false, error: 'Website, username, and password are required.' };
+  try {
+    if (!['http:', 'https:'].includes(new URL(url).protocol)) throw new Error();
+  } catch (_) {
+    return { ok: false, error: 'Enter a valid website URL.' };
+  }
+  try {
+    const entries = readPasswordVault();
+    entries.push({ id: crypto.randomUUID(), name: '', url, username, password });
+    writePasswordVault(entries);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('passwords:copy', (event, id) => {
+  if (!isSettingsSender(event.sender)) return { ok: false };
+  try {
+    const entry = readPasswordVault().find((item) => item.id === id);
+    if (!entry) return { ok: false };
+    clipboard.writeText(entry.password);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
+ipcMain.handle('passwords:delete', (event, id) => {
+  if (!isSettingsSender(event.sender)) return { ok: false };
+  try {
+    writePasswordVault(readPasswordVault().filter((entry) => entry.id !== id));
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, error: err.message };
+  }
+});
+
 // ---------- IPC from the toolbar UI ----------
 ipcMain.on('cmd', (event, name, p = {}) => {
   const w = windowFor(event.sender);
   if (!w) return;
   switch (name) {
     case 'tab:new': createTab(w, HOME_PAGE); break;
+    case 'group:new-active': { const tab = activeTab(w); newGroup(w, tab && tab.id); break; }
+    case 'open-settings': openSettings(w); break;
     case 'tab:select': activate(w, p.id); break;
     case 'tab:close': closeTab(w, p.id); break;
     case 'nav': navigate(w, p.action, p.value); break;
@@ -517,7 +872,12 @@ setInterval(() => {
 
 // ---------- app lifecycle ----------
 app.whenReady().then(() => {
-  createWindow();
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.safari.chromium');
+    setDefaultWebProtocols();
+  }
+  const startupUrl = process.argv.find((arg) => /^https?:\/\//i.test(arg));
+  createWindow({ url: startupUrl || HOME_PAGE });
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; img-src 'self' data:; style-src 'self'; script-src 'self'; connect-src 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Safari Settings</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <header class="settings-header">
+    <img src="../assets/safari-night.svg" alt="">
+    <div><p class="eyebrow">Safari for Windows</p><h1>Settings</h1></div>
+  </header>
+
+  <main>
+    <section class="settings-section">
+      <h2>Appearance</h2>
+      <label class="select-row" for="theme"><span>App appearance</span>
+        <select id="theme" data-setting="theme"><option value="system">Use system setting</option><option value="light">Light</option><option value="dark">Dark</option></select>
+      </label>
+    </section>
+
+    <section class="settings-section">
+      <h2>Search</h2>
+      <label class="select-row" for="search-engine"><span>Search engine</span>
+        <select id="search-engine" data-setting="searchEngine"><option value="google">Google</option><option value="duckduckgo">DuckDuckGo</option><option value="bing">Bing</option></select>
+      </label>
+    </section>
+
+    <section class="settings-section">
+      <h2>Privacy &amp; Performance</h2>
+      <label class="toggle-row"><span><strong>JavaScript</strong><small>Disable scripts in every tab</small></span><input type="checkbox" data-setting="javascriptEnabled"></label>
+      <label class="toggle-row"><span><strong>uBlock Origin</strong><small>Filter ads and unwanted requests</small></span><input type="checkbox" data-setting="ublockEnabled"></label>
+      <label class="toggle-row"><span><strong>WebAssembly</strong><small>Includes WebAssembly GC; restart required</small></span><input type="checkbox" data-setting="webAssemblyEnabled"></label>
+      <label class="toggle-row"><span><strong>Hardware acceleration</strong><small>Recommended for video and cloud gaming; restart required</small></span><input type="checkbox" data-setting="hardwareAcceleration"></label>
+    </section>
+
+    <section class="settings-section default-section">
+      <div><h2>Default browser</h2><p id="default-status" class="section-note">Checking Windows settings...</p></div>
+      <button id="default-button" class="secondary-button" type="button">Choose in Windows</button>
+    </section>
+
+    <section class="settings-section passwords-section">
+      <div class="password-heading"><div><h2>Passwords</h2><p class="section-note">Passwords are encrypted with your operating-system credentials on this device.</p></div>
+        <button id="import-passwords" class="secondary-button" type="button">Import CSV</button>
+      </div>
+      <p id="vault-note" class="section-note import-note">Export passwords as a CSV from Chrome or Edge, then import that file here. Imported passwords are stored in the encrypted local vault.</p>
+      <form id="password-form" class="password-form">
+        <input name="url" type="url" placeholder="Website URL" required autocomplete="url">
+        <input name="username" type="text" placeholder="Username" required autocomplete="username">
+        <input name="password" type="password" placeholder="Password" required autocomplete="new-password">
+        <button class="primary-button" type="submit">Add password</button>
+      </form>
+      <p id="password-status" class="status" role="status" aria-live="polite"></p>
+      <div id="password-list" class="password-list"></div>
+    </section>
+  </main>
+  <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>
+  <script src="settings.js"></script>
+</body>
+</html>

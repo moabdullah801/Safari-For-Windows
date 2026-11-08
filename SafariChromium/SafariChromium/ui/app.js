@@ -8,6 +8,7 @@
     tabs: [], groups: [], activeId: null, url: '',
     canBack: false, canForward: false, loading: false,
     isPrivate: false, maximized: false, trackersBlocked: 0, blockerOn: true,
+    theme: 'system',
   };
   let editingGroup = false; // don't rebuild the tab strip while a group is being renamed
 
@@ -30,6 +31,8 @@
 
   function render() {
     document.body.classList.toggle('private', state.isPrivate);
+    if (state.theme === 'system') document.documentElement.removeAttribute('data-theme');
+    else document.documentElement.dataset.theme = state.theme;
 
     $('back').disabled = !state.canBack;
     $('forward').disabled = !state.canForward;
@@ -146,6 +149,8 @@
   $('forward').addEventListener('click', () => send('nav', { action: 'forward' }));
   $('reload').addEventListener('click', () => send('nav', { action: state.loading ? 'stop' : 'reload' }));
   $('new-tab').addEventListener('click', () => send('tab:new'));
+  $('group-tab').addEventListener('click', () => send('group:new-active'));
+  $('settings').addEventListener('click', () => send('open-settings'));
   $('share').addEventListener('click', () => send('copy-link'));
   $('shield').addEventListener('click', () => send('toggle-blocker'));
   $('dots').addEventListener('click', (event) => {

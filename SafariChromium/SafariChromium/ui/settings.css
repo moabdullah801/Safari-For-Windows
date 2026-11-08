@@ -1,0 +1,82 @@
+:root {
+  color-scheme: light;
+  --page: #f3f5f4;
+  --surface: #fff;
+  --ink: #1d2729;
+  --muted: #718084;
+  --line: #dce3e2;
+  --accent: #167f83;
+  --danger: #c34336;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #171d20;
+  --surface: #252e32;
+  --ink: #eff5f3;
+  --muted: #a0afb0;
+  --line: #3a4649;
+  --accent: #72d3ca;
+  --danger: #ff8c7d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #171d20;
+    --surface: #252e32;
+    --ink: #eff5f3;
+    --muted: #a0afb0;
+    --line: #3a4649;
+    --accent: #72d3ca;
+    --danger: #ff8c7d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; padding: 30px max(24px, calc((100% - 740px) / 2)) 48px; background: var(--page); color: var(--ink); font: 14px/1.45 "Avenir Next", Avenir, "Segoe UI", sans-serif; }
+.settings-header { display: flex; align-items: center; gap: 14px; padding: 4px 0 26px; border-bottom: 1px solid var(--line); }
+.settings-header img { width: 42px; height: 42px; }
+.eyebrow { margin: 0 0 3px; color: var(--accent); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+h1 { margin: 0; font-family: Georgia, "Times New Roman", serif; font-size: 28px; font-weight: 400; }
+.settings-section { padding: 22px 0; border-bottom: 1px solid var(--line); }
+h2 { margin: 0; font-size: 15px; font-weight: 650; }
+.select-row, .toggle-row { min-height: 46px; display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.select-row { margin-top: 12px; }
+select, input:not([type="checkbox"]) { min-height: 36px; padding: 0 10px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; }
+select { min-width: 190px; }
+.toggle-row { border-top: 1px solid var(--line); }
+.toggle-row:first-of-type { margin-top: 9px; }
+.toggle-row span { display: flex; flex-direction: column; gap: 2px; }
+.toggle-row strong { font-weight: 550; }
+.toggle-row small, .section-note { color: var(--muted); font-size: 12px; }
+.toggle-row input { width: 17px; height: 17px; accent-color: var(--accent); }
+.default-section, .password-heading { display: flex; justify-content: space-between; align-items: center; gap: 20px; }
+.section-note { margin: 5px 0 0; }
+button { font: inherit; cursor: pointer; }
+.secondary-button, .primary-button, .mini-button { min-height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); white-space: nowrap; }
+.secondary-button:hover, .mini-button:hover { border-color: var(--accent); }
+.primary-button { border-color: var(--accent); background: var(--accent); color: #fff; }
+.passwords-section { padding-bottom: 10px; }
+.import-note { max-width: 580px; margin: 12px 0 16px; }
+.password-form { display: grid; grid-template-columns: minmax(150px, 1.1fr) minmax(120px, 1fr) minmax(130px, 1fr) auto; gap: 8px; }
+.password-form input { width: 100%; min-width: 0; }
+.status { min-height: 18px; margin: 10px 0; color: var(--muted); font-size: 12px; }
+.error { color: var(--danger); }
+.password-list { border-top: 1px solid var(--line); }
+.password-row { min-height: 58px; display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: 8px; border-bottom: 1px solid var(--line); }
+.password-row > div { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.password-row strong, .password-row small { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.password-row strong { font-size: 12px; font-weight: 600; }
+.password-row small { color: var(--muted); font-size: 11px; }
+.mini-button { min-height: 29px; padding: 0 8px; font-size: 11px; }
+.remove-button { color: var(--danger); }
+.settings-status { position: fixed; right: 18px; bottom: 8px; color: var(--muted); font-size: 11px; }
+@media (max-width: 680px) {
+  body { padding: 20px 16px 42px; }
+  .password-form { grid-template-columns: 1fr 1fr; }
+  .password-form input:first-child { grid-column: 1 / -1; }
+  .default-section, .password-heading { align-items: flex-start; }
+}
+@media (max-width: 420px) {
+  .password-form { grid-template-columns: 1fr; }
+  .password-form input:first-child { grid-column: auto; }
+  .password-heading { flex-direction: column; }
+}
