@@ -668,6 +668,7 @@ function attachTabView(w, tab) {
   };
   wc.on('did-navigate', onNavigate);
   wc.on('did-navigate-in-page', onNavigate);
+  wc.on('context-menu', (event, params) => showPageContextMenu(w, tab, event, params));
 }
 
 function reloadTabWithSettings(w, tab) {
@@ -1174,6 +1175,77 @@ function privacyItems(w) {
       click: () => { clearHistory(); },
     },
   ];
+}
+
+function pageContextMenuItems(w, tab, params) {
+  const wc = tab.view.webContents;
+  const items = [];
+  const webLink = /^https?:\/\//i.test(params.linkURL || '');
+
+  if (webLink) {
+    items.push(
+      { label: 'Open Link in New Tab', click: () => createTab(w, params.linkURL) },
+      { label: 'Open Link in This Tab', click: () => wc.loadURL(params.linkURL).catch(() => {}) },
+      { label: 'Copy Link Address', click: () => clipboard.writeText(params.linkURL) },
+      { label: 'Download Linked File...', click: () => wc.downloadURL(params.linkURL) },
+      { type: 'separator' },
+    );
+  }
+
+  if (params.mediaType === 'image' && params.srcURL) {
+    items.push(
+      { label: 'Open Image in New Tab', click: () => createTab(w, params.srcURL) },
+      { label: 'Copy Image', click: () => wc.copyImageAt(params.x, params.y) },
+      { label: 'Save Image...', click: () => wc.downloadURL(params.srcURL) },
+      { type: 'separator' },
+    );
+  }
+
+  if (params.isEditable) {
+    const flags = params.editFlags || {};
+    items.push(
+      { label: 'Undo', role: 'undo', enabled: !!flags.canUndo },
+      { label: 'Redo', role: 'redo', enabled: !!flags.canRedo },
+      { type: 'separator' },
+      { label: 'Cut', role: 'cut', enabled: !!flags.canCut },
+      { label: 'Copy', role: 'copy', enabled: !!flags.canCopy },
+      { label: 'Paste', role: 'paste', enabled: !!flags.canPaste },
+      { label: 'Select All', role: 'selectAll', enabled: !!flags.canSelectAll },
+      { type: 'separator' },
+    );
+  } else if (params.selectionText) {
+    const selection = params.selectionText;
+    items.push(
+      { label: 'Copy', click: () => clipboard.writeText(selection) },
+      { label: `Search for “${selection.slice(0, 40)}”`, click: () => createTab(w, SEARCH_ENGINES[settings.searchEngine] + encodeURIComponent(selection)) },
+      { type: 'separator' },
+    );
+  }
+
+  items.push(
+    { label: 'Back', enabled: safe(() => navOf(wc).canGoBack(), false), click: () => safe(() => navOf(wc).goBack()) },
+    { label: 'Forward', enabled: safe(() => navOf(wc).canGoForward(), false), click: () => safe(() => navOf(wc).goForward()) },
+    { label: 'Reload', click: () => wc.reload() },
+  );
+
+  if (/^https?:\/\//i.test(tab.url)) {
+    const isBookmarked = bookmarks.some((bookmark) => bookmark.url === tab.url);
+    items.push({ label: isBookmarked ? 'Remove Bookmark' : 'Bookmark This Page', click: () => toggleBookmark(w) });
+  }
+  if (settings.developerToolsEnabled) {
+    items.push({ type: 'separator' }, { label: 'Inspect', click: () => wc.inspectElement(params.x, params.y) });
+  }
+  return items;
+}
+
+function showPageContextMenu(w, tab, event, params) {
+  if (!w || w.win.isDestroyed() || w.activeId !== tab.id || !params) return;
+  event.preventDefault();
+  Menu.buildFromTemplate(pageContextMenuItems(w, tab, params)).popup({
+    window: w.win,
+    x: Math.round(params.x || 0),
+    y: Math.round((params.y || 0) + CHROME_HEIGHT),
+  });
 }
 
 function toggleBlocker() {
