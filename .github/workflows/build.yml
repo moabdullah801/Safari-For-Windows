@@ -1,4 +1,3 @@
-
 name: Build Safari Portable
 
 on:
@@ -21,14 +20,16 @@ jobs:
           node-version: 22
 
       - name: Install dependencies
+        working-directory: SafariChromium/SafariChromium
         run: npm install
 
       - name: Build portable Safari
+        working-directory: SafariChromium/SafariChromium
         run: npx electron-builder --win portable --publish never
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
           name: Safari-Portable-Windows
-          path: dist/*.exe
+          path: SafariChromium/SafariChromium/dist/*.exe
           if-no-files-found: error
