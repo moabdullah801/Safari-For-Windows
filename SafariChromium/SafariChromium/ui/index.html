@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' https: data:; style-src 'self'; script-src 'self'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Safari</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header id="chrome">
+    <div class="toolbar">
+      <div class="nav-group">
+        <button id="back" class="icon-btn" title="Back" aria-label="Back">
+          <svg viewBox="0 0 16 16"><path d="M10 3 5 8l5 5"/></svg>
+        </button>
+        <button id="forward" class="icon-btn" title="Forward" aria-label="Forward">
+          <svg viewBox="0 0 16 16"><path d="M6 3l5 5-5 5"/></svg>
+        </button>
+      </div>
+
+      <span class="private-badge">Private</span>
+
+      <div class="address-wrap">
+        <button id="shield" class="shield" aria-label="Content blocker">
+          <svg viewBox="0 0 16 16"><path d="M8 1.5 13.5 3.5v4c0 3.2-2.4 5.6-5.5 7-3.1-1.4-5.5-3.8-5.5-7v-4z"/></svg>
+          <span id="shield-count">0</span>
+        </button>
+        <input id="address" type="text" placeholder="Search or enter website name"
+               spellcheck="false" autocomplete="off" aria-label="Address">
+        <button id="reload" class="icon-btn small" data-mode="reload" title="Reload" aria-label="Reload">
+          <svg class="icon-reload" viewBox="0 0 16 16"><path d="M13 8a5 5 0 1 1-1.5-3.5"/><path d="M13 2.5v3h-3"/></svg>
+          <svg class="icon-stop" viewBox="0 0 16 16"><path d="M4 4l8 8M12 4l-8 8"/></svg>
+        </button>
+      </div>
+
+      <div class="right-group">
+        <button id="share" class="icon-btn" title="Copy link" aria-label="Copy link">
+          <svg viewBox="0 0 16 16"><path d="M5 6H4v8h8V6h-1"/><path d="M8 9.5V2M5.5 4.5 8 2l2.5 2.5"/></svg>
+        </button>
+        <button id="new-tab" class="icon-btn" title="New tab" aria-label="New tab">
+          <svg viewBox="0 0 16 16"><path d="M8 3v10M3 8h10"/></svg>
+        </button>
+        <button id="dots" class="icon-btn" title="More" aria-label="More">
+          <svg viewBox="0 0 16 16" class="dots"><circle cx="3" cy="8" r="1.5"/><circle cx="8" cy="8" r="1.5"/><circle cx="13" cy="8" r="1.5"/></svg>
+        </button>
+        <div class="win-controls">
+          <button id="min" aria-label="Minimize" title="Minimize"><svg viewBox="0 0 10 10"><path d="M1 5h8"/></svg></button>
+          <button id="max" aria-label="Maximize" title="Maximize"><svg viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7"/></svg></button>
+          <button id="close" class="close" aria-label="Close" title="Close"><svg viewBox="0 0 10 10"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7"/></svg></button>
+        </div>
+      </div>
+    </div>
+
+    <div id="tabs" class="tabs" role="tablist"></div>
+  </header>
+
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,173 @@
+// Toolbar UI. Pure view: it renders state sent by main.js and sends commands back.
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const tabsEl = $('tabs');
+  const address = $('address');
+
+  let state = {
+    tabs: [], groups: [], activeId: null, url: '',
+    canBack: false, canForward: false, loading: false,
+    isPrivate: false, maximized: false, trackersBlocked: 0, blockerOn: true,
+  };
+  let editingGroup = false; // don't rebuild the tab strip while a group is being renamed
+
+  const send = (name, payload) => window.browser.send(name, payload);
+
+  window.browser.onState((next) => {
+    state = next;
+    render();
+  });
+  window.browser.onFocusAddress(() => {
+    address.focus();
+    address.select();
+  });
+
+  function shortUrl(url) {
+    if (!url) return '';
+    try { return new URL(url).hostname.replace(/^www\./, ''); }
+    catch (_) { return url; }
+  }
+
+  function render() {
+    document.body.classList.toggle('private', state.isPrivate);
+
+    $('back').disabled = !state.canBack;
+    $('forward').disabled = !state.canForward;
+    $('reload').dataset.mode = state.loading ? 'stop' : 'reload';
+    $('reload').title = state.loading ? 'Stop' : 'Reload';
+    $('max').textContent = '';
+    $('max').innerHTML = state.maximized
+      ? '<svg viewBox="0 0 10 10"><path d="M3 1.5h5.5V7M1.5 3h5.5v5.5H1.5z"/></svg>'
+      : '<svg viewBox="0 0 10 10"><rect x="1.5" y="1.5" width="7" height="7"/></svg>';
+
+    $('shield').classList.toggle('off', !state.blockerOn);
+    $('shield').title = state.blockerOn
+      ? `Content blocker on. Trackers blocked: ${state.trackersBlocked}. Click to turn off.`
+      : 'Content blocker is off. Click to turn on.';
+    $('shield-count').textContent = state.trackersBlocked;
+
+    if (document.activeElement !== address) address.value = shortUrl(state.url);
+    renderTabs();
+  }
+
+  function renderTabs() {
+    if (editingGroup) return;
+    tabsEl.textContent = '';
+    let lastGroupId = null;
+    for (const tab of state.tabs) {
+      const group = state.groups.find((g) => g.id === tab.groupId) || null;
+      if (group && group.id !== lastGroupId) tabsEl.appendChild(groupLabel(group));
+      lastGroupId = group ? group.id : null;
+      tabsEl.appendChild(tabElement(tab, group));
+    }
+    const active = tabsEl.querySelector('.tab.active');
+    if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  }
+
+  function tabElement(tab, group) {
+    const el = document.createElement('div');
+    el.className = 'tab'
+      + (tab.id === state.activeId ? ' active' : '')
+      + (group ? ' grouped' : '');
+    if (group) el.style.setProperty('--gc', group.color);
+    el.title = tab.title;
+    el.setAttribute('role', 'tab');
+
+    el.addEventListener('click', () => send('tab:select', { id: tab.id }));
+    el.addEventListener('auxclick', (event) => {
+      if (event.button === 1) {
+        event.preventDefault();
+        send('tab:close', { id: tab.id });
+      }
+    });
+
+    const icon = document.createElement('span');
+    icon.className = 'tab-icon' + (tab.loading ? ' spin' : '');
+    if (!tab.loading && tab.favicon) {
+      const img = document.createElement('img');
+      img.src = tab.favicon;
+      img.alt = '';
+      img.addEventListener('error', () => img.remove());
+      icon.appendChild(img);
+    } else if (!tab.loading) {
+      icon.innerHTML = '<svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6"/><path d="M2 8h12M8 2c2 2.2 2 9.8 0 12M8 2c-2 2.2-2 9.8 0 12"/></svg>';
+    }
+
+    const title = document.createElement('span');
+    title.className = 'tab-title';
+    title.textContent = tab.title || 'New Tab';
+
+    const close = document.createElement('button');
+    close.className = 'tab-close';
+    close.setAttribute('aria-label', 'Close tab');
+    close.textContent = '✕';
+    close.addEventListener('click', (event) => {
+      event.stopPropagation();
+      send('tab:close', { id: tab.id });
+    });
+
+    el.append(icon, title, close);
+    return el;
+  }
+
+  function groupLabel(group) {
+    const el = document.createElement('div');
+    el.className = 'group-label';
+    el.style.setProperty('--gc', group.color);
+    el.textContent = group.name;
+    el.title = 'Double-click to rename';
+
+    el.addEventListener('dblclick', () => {
+      editingGroup = true;
+      el.contentEditable = 'true';
+      el.focus();
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const selection = window.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+
+      const finish = () => {
+        el.contentEditable = 'false';
+        editingGroup = false;
+        send('group:rename', { id: group.id, name: el.textContent });
+      };
+      el.addEventListener('blur', finish, { once: true });
+      el.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') { event.preventDefault(); el.blur(); }
+        if (event.key === 'Escape') { el.textContent = group.name; el.blur(); }
+      });
+    });
+    return el;
+  }
+
+  // ---------- toolbar buttons ----------
+  $('back').addEventListener('click', () => send('nav', { action: 'back' }));
+  $('forward').addEventListener('click', () => send('nav', { action: 'forward' }));
+  $('reload').addEventListener('click', () => send('nav', { action: state.loading ? 'stop' : 'reload' }));
+  $('new-tab').addEventListener('click', () => send('tab:new'));
+  $('share').addEventListener('click', () => send('copy-link'));
+  $('shield').addEventListener('click', () => send('toggle-blocker'));
+  $('dots').addEventListener('click', (event) => {
+    const r = event.currentTarget.getBoundingClientRect();
+    send('menu', { x: r.left, y: r.bottom });
+  });
+  $('min').addEventListener('click', () => send('win', { action: 'min' }));
+  $('max').addEventListener('click', () => send('win', { action: 'max' }));
+  $('close').addEventListener('click', () => send('win', { action: 'close' }));
+
+  // ---------- address bar ----------
+  address.addEventListener('focus', () => {
+    address.value = state.url || '';
+    address.select();
+  });
+  address.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') {
+      send('nav', { action: 'go', value: address.value });
+      address.blur();
+    } else if (event.key === 'Escape') {
+      address.blur();
+    }
+  });
+  address.addEventListener('blur', () => render());
+})();

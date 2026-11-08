@@ -1,0 +1,39 @@
+{
+  "name": "safari-chromium",
+  "productName": "Safari",
+  "version": "1.0.0",
+  "description": "Safari-style privacy browser built on Chromium (Electron)",
+  "main": "main.js",
+  "author": "",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --win"
+  },
+  "devDependencies": {
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "build": {
+    "appId": "com.example.safari-chromium",
+    "productName": "Safari",
+    "files": [
+      "**/*",
+      "!dist/**",
+      "!tools/**"
+    ],
+    "asarUnpack": [
+      "extensions/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    }
+  }
+}
