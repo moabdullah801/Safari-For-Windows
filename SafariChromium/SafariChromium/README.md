@@ -39,6 +39,8 @@ npm run build        :: creates an installer and a portable .exe in dist\
 
 To publish an auto-updating Windows installer, increment the package version, commit the change, then push a matching `v` tag (for example `v1.0.2`). The release workflow publishes the NSIS installer and update metadata to GitHub Releases. Portable builds do not self-update and must be replaced manually.
 
+Both build workflows accept the GitHub Actions secrets `WINDOWS_CERTIFICATE_BASE64` (a trusted Windows code-signing certificate encoded as base64) and `WINDOWS_CERTIFICATE_PASSWORD`. Without a trusted signing certificate, downloaded executables are unsigned and Chrome or Windows SmartScreen may warn or block them; signing and download reputation can reduce those warnings but cannot guarantee immediate Safe Browsing approval. CI also publishes `SHA256SUMS.txt` so users can verify a download's integrity. A checksum is not a signature and does not establish that a file is safe.
+
 Electron includes a full Chromium engine, so you get Chromium's rendering and JavaScript.
 
 ## Files

@@ -44,6 +44,19 @@ jobs:
       - name: Build installer
         run: npx electron-builder --win nsis --publish never
         working-directory: SafariChromium/SafariChromium
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        working-directory: SafariChromium/SafariChromium
+        run: |
+          $lines = Get-ChildItem "dist/*.exe" | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          }
+          $lines | Set-Content "dist/SHA256SUMS.txt" -Encoding ascii
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
@@ -56,3 +69,4 @@ jobs:
             SafariChromium/SafariChromium/dist/*.exe
             SafariChromium/SafariChromium/dist/*.blockmap
             SafariChromium/SafariChromium/dist/latest.yml
+            SafariChromium/SafariChromium/dist/SHA256SUMS.txt

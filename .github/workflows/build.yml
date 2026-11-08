@@ -30,10 +30,24 @@ jobs:
       - name: Build portable Safari
         run: npx electron-builder --win portable --publish never
         working-directory: SafariChromium/SafariChromium
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CERTIFICATE_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+
+      - name: Generate SHA-256 checksum
+        shell: pwsh
+        run: |
+          $lines = Get-ChildItem "SafariChromium/SafariChromium/dist/*.exe" | ForEach-Object {
+            $hash = (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower()
+            "$hash  $($_.Name)"
+          }
+          $lines | Set-Content "SafariChromium/SafariChromium/dist/SHA256SUMS.txt" -Encoding ascii
 
       - name: Upload EXE
         uses: actions/upload-artifact@v4
         with:
           name: Safari-Portable-Windows
-          path: SafariChromium/SafariChromium/dist/*.exe
+          path: |
+            SafariChromium/SafariChromium/dist/*.exe
+            SafariChromium/SafariChromium/dist/SHA256SUMS.txt
           if-no-files-found: error
