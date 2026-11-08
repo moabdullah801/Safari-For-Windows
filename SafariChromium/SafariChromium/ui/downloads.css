@@ -1,0 +1,54 @@
+:root {
+  color-scheme: light;
+  --page: #f3f5f4;
+  --surface: #fff;
+  --ink: #1d2729;
+  --muted: #718084;
+  --line: #dce3e2;
+  --accent: #167f83;
+  --danger: #bd3d31;
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --page: #171d20;
+  --surface: #252e32;
+  --ink: #eff5f3;
+  --muted: #a0afb0;
+  --line: #3a4649;
+  --accent: #72d3ca;
+  --danger: #ff8c7d;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --page: #171d20;
+    --surface: #252e32;
+    --ink: #eff5f3;
+    --muted: #a0afb0;
+    --line: #3a4649;
+    --accent: #72d3ca;
+    --danger: #ff8c7d;
+  }
+}
+* { box-sizing: border-box; }
+body { margin: 0; min-height: 100vh; padding: 28px clamp(18px, 5vw, 52px); background: var(--page); color: var(--ink); font: 14px/1.45 "Avenir Next", Avenir, "Segoe UI", sans-serif; }
+.downloads-header { display: flex; justify-content: space-between; align-items: end; gap: 20px; padding-bottom: 20px; border-bottom: 1px solid var(--line); }
+.eyebrow { margin: 0 0 4px; color: var(--accent); font-size: 10px; font-weight: 700; text-transform: uppercase; }
+h1 { margin: 0; font: 400 28px/1.2 Georgia, "Times New Roman", serif; }
+.secondary-button, .action-button { min-height: 34px; padding: 0 12px; border: 1px solid var(--line); border-radius: 7px; background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.secondary-button:hover, .action-button:hover { border-color: var(--accent); }
+.empty-state { padding: 32px 0; color: var(--muted); text-align: center; }
+.empty-state[hidden] { display: none; }
+.download-row { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.download-row.flagged { margin: 0 -12px; padding: 16px 12px; background: color-mix(in srgb, #d64538 9%, var(--page)); }
+.title-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; }
+.title-row strong { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
+.download-state { flex: none; color: var(--muted); font-size: 12px; }
+progress { display: block; width: 100%; height: 5px; margin-top: 12px; accent-color: var(--accent); }
+.scan-detail, .scan-warning { margin: 8px 0 0; color: var(--muted); font-size: 12px; }
+.scan-warning { color: var(--danger); font-weight: 600; }
+.hash { display: block; margin-top: 8px; overflow-wrap: anywhere; color: var(--muted); font: 11px/1.4 ui-monospace, Consolas, monospace; }
+.download-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 12px; }
+.action-button { min-height: 30px; padding: 0 10px; font-size: 12px; }
+.action-button.destructive { color: var(--danger); }
+@media (max-width: 520px) { body { padding: 18px 14px; }.downloads-header { align-items: start; flex-direction: column; } }

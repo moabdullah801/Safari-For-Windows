@@ -5,6 +5,10 @@ contextBridge.exposeInMainWorld('browser', {
   send: (name, payload) => ipcRenderer.send('cmd', name, payload),
   onState: (callback) => ipcRenderer.on('state', (_event, state) => callback(state)),
   onFocusAddress: (callback) => ipcRenderer.on('focus-address', () => callback()),
+  downloads: {
+    onState: (callback) => ipcRenderer.on('downloads-state', (_event, state) => callback(state)),
+    send: (name, payload) => ipcRenderer.send('downloads-command', name, payload),
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     save: (updates) => ipcRenderer.invoke('settings:save', updates),

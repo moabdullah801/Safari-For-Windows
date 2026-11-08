@@ -10,7 +10,7 @@ A Safari-style privacy browser for Windows, built on Chromium using Electron.
 - **Bookmarks:** use the star button to save or remove the current page; open saved pages from the Bookmarks menu.
 - **Install websites:** choose "Install This Site as an App" from the top-right menu to add a Windows desktop shortcut that opens the site in its own browser window.
 - **Cookies and cache:** both are enabled by default. Cookie handling can be changed in Settings; disabling or re-enabling cache files takes effect after restart. Clear cookies or cached files separately from the Cookies & Cache section.
-- **Downloads:** track progress from the toolbar. Files download to a temporary quarantine path, then Windows Defender scans them when available. Threat detections, risky executable/document types, and unavailable scans are flagged for an explicit Keep/Delete choice; SHA-256 is shown for verification.
+- **Downloads:** open the standalone Downloads window from the toolbar to track progress and manage files. Downloads use a temporary quarantine path, then Windows Defender scans them when available. Threat detections, risky executable/document types, and unavailable scans are flagged for an explicit Keep/Delete choice; SHA-256 is shown for verification.
 - **Extensions:** open the Extensions button to visit the Chrome Web Store or manage extensions. Extracted extensions can be loaded and removed in Settings.
 - **Performance:** see current app RAM/CPU use, choose a best-effort RAM target, and hibernate idle background tabs. Recommended settings are based on detected RAM and logical CPU count.
 - **Advanced settings:** control download scanning, privacy headers, Developer Tools, JavaScript, WebAssembly, cookies, and uBlock Origin.

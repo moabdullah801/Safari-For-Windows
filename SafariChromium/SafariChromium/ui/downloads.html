@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'self'; script-src 'self'; connect-src 'none'; form-action 'none'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Downloads - Safari</title>
+  <link rel="stylesheet" href="downloads.css">
+</head>
+<body>
+  <header class="downloads-header">
+    <div><p class="eyebrow">Safari</p><h1>Downloads</h1></div>
+    <button id="clear-downloads" class="secondary-button" type="button">Clear history</button>
+  </header>
+  <main>
+    <p id="empty-state" class="empty-state">No downloads yet.</p>
+    <div id="download-list" class="download-list"></div>
+  </main>
+  <script src="downloads.js"></script>
+</body>
+</html>

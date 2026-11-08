@@ -59,6 +59,7 @@ try {
 const ublockIds = new WeakMap();
 const userExtensionIds = new WeakMap();
 const downloads = new Map();
+const downloadWindows = new Map();
 
 let blockerOn = true;
 let trackersBlocked = 0;
@@ -302,6 +303,27 @@ function downloadSnapshot(download, isPrivate) {
 
 function publishDownloads() {
   for (const browser of windows) push(browser);
+  for (const entry of downloadWindows.values()) {
+    if (entry.win.isDestroyed()) continue;
+    entry.win.webContents.send('downloads-state', [...downloads.values()]
+      .filter((download) => download.isPrivate === entry.isPrivate)
+      .map((download) => downloadSnapshot(download, entry.isPrivate)));
+  }
+}
+
+function handleDownloadCommand(isPrivate, name, id) {
+  if (name === 'clear') {
+    for (const [downloadId, download] of downloads) {
+      if (download.isPrivate === isPrivate && !['Downloading', 'Scanning', 'Choose save location'].includes(download.status)) downloads.delete(downloadId);
+    }
+    publishDownloads();
+    return;
+  }
+  const download = downloads.get(id);
+  if (!download || download.isPrivate !== isPrivate) return;
+  if (name === 'cancel' && download.item) download.item.cancel();
+  else if (name === 'open' && download.status === 'Complete') shell.openPath(download.targetPath);
+  else if (name === 'show' && download.status === 'Complete') shell.showItemInFolder(download.targetPath);
 }
 
 function defenderCliPath() {
@@ -917,6 +939,38 @@ function openSettings(w) {
 
 function isSettingsSender(sender) {
   return [...settingsWindows].some((win) => !win.isDestroyed() && win.webContents === sender);
+}
+
+function openDownloads(w) {
+  const existing = [...downloadWindows.values()].find((entry) => entry.isPrivate === w.isPrivate);
+  if (existing && !existing.win.isDestroyed()) {
+    existing.win.focus();
+    return;
+  }
+  const win = new BrowserWindow({
+    width: 720,
+    height: 640,
+    minWidth: 480,
+    minHeight: 420,
+    title: 'Downloads - Safari',
+    parent: w && !w.win.isDestroyed() ? w.win : undefined,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      sandbox: true,
+    },
+  });
+  const entry = { win, isPrivate: w.isPrivate, owner: w };
+  downloadWindows.set(win.webContents.id, entry);
+  win.setBackgroundColor(settings.theme === 'dark' ? '#171d20' : '#f3f5f4');
+  win.setMenuBarVisibility(false);
+  win.on('closed', () => downloadWindows.delete(win.webContents.id));
+  win.webContents.on('did-finish-load', () => {
+    win.webContents.send('downloads-state', [...downloads.values()]
+      .filter((download) => download.isPrivate === entry.isPrivate)
+      .map((download) => downloadSnapshot(download, entry.isPrivate)));
+  });
+  win.loadFile(path.join(__dirname, 'ui', 'downloads.html'), { query: { theme: settings.theme } });
 }
 
 function setDefaultWebProtocols() {
@@ -1628,6 +1682,12 @@ ipcMain.on('login-field-focus', (event, bounds) => {
   }
 });
 
+ipcMain.on('downloads-command', (event, name, payload = {}) => {
+  const entry = downloadWindows.get(event.sender.id);
+  if (!entry || entry.win.isDestroyed()) return;
+  handleDownloadCommand(entry.isPrivate, name, payload.id);
+});
+
 ipcMain.on('cmd', (event, name, p = {}) => {
   const w = windowFor(event.sender);
   if (!w) return;
@@ -1638,28 +1698,11 @@ ipcMain.on('cmd', (event, name, p = {}) => {
     case 'passwords:menu': showPasswordsMenu(w, p.x, p.y); break;
     case 'extensions:menu': showExtensionsMenu(w, p.x, p.y); break;
     case 'extensions:store': createTab(w, 'https://chromewebstore.google.com/'); break;
-    case 'download:cancel': {
-      const item = downloads.get(p.id);
-      if (item && item.isPrivate === w.isPrivate && item.item) item.item.cancel();
-      break;
-    }
-    case 'download:open': {
-      const item = downloads.get(p.id);
-      if (item && item.isPrivate === w.isPrivate && item.status === 'Complete') shell.openPath(item.targetPath);
-      break;
-    }
-    case 'download:show': {
-      const item = downloads.get(p.id);
-      if (item && item.isPrivate === w.isPrivate && item.status === 'Complete') shell.showItemInFolder(item.targetPath);
-      break;
-    }
-    case 'download:clear': {
-      for (const [id, item] of downloads) {
-        if (item.isPrivate === w.isPrivate && !['Downloading', 'Scanning', 'Choose save location'].includes(item.status)) downloads.delete(id);
-      }
-      windows.forEach(push);
-      break;
-    }
+    case 'open-downloads': openDownloads(w); break;
+    case 'download:cancel':
+    case 'download:open':
+    case 'download:show':
+    case 'download:clear': handleDownloadCommand(w.isPrivate, name.slice('download:'.length), p.id); break;
     case 'group:new-active': { const tab = activeTab(w); newGroup(w, tab && tab.id); break; }
     case 'open-settings': openSettings(w); break;
     case 'tab:select': activate(w, p.id); break;

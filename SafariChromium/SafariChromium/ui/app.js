@@ -13,7 +13,6 @@
   };
   let editingGroup = false; // don't rebuild the tab strip while a group is being renamed
   let draggingTabId = null;
-  let downloadsOpen = false;
 
   const send = (name, payload) => window.browser.send(name, payload);
 
@@ -56,11 +55,10 @@
 
     if (document.activeElement !== address) address.value = shortUrl(state.url);
     renderTabs();
-    renderDownloads();
+    renderDownloadBadge();
   }
 
-  function renderDownloads() {
-    const panel = $('downloads-panel');
+  function renderDownloadBadge() {
     const entries = state.downloads || [];
     const pending = entries.filter((entry) => ['Downloading', 'Scanning', 'Choose save location'].includes(entry.status)).length;
     const flagged = entries.filter((entry) => entry.status === 'Flagged').length;
@@ -71,64 +69,6 @@
     $('downloads-button').classList.toggle('has-downloads', badgeCount > 0);
     $('downloads-button').classList.toggle('has-flagged-download', flagged > 0);
     $('downloads-button').title = flagged ? `${flagged} download${flagged === 1 ? '' : 's'} flagged for review` : 'Downloads';
-    $('downloads-button').setAttribute('aria-expanded', String(downloadsOpen));
-    panel.hidden = !downloadsOpen;
-
-    const list = $('download-list');
-    list.replaceChildren();
-    if (!entries.length) {
-      const empty = document.createElement('p');
-      empty.className = 'downloads-empty';
-      empty.textContent = 'No downloads yet.';
-      list.append(empty);
-      return;
-    }
-    for (const entry of entries.slice().reverse()) {
-      const row = document.createElement('article');
-      row.className = 'download-entry' + (entry.status === 'Flagged' ? ' flagged' : '');
-      const name = document.createElement('strong');
-      name.className = 'download-name';
-      name.textContent = entry.filename;
-      const status = document.createElement('span');
-      status.className = 'download-status';
-      status.textContent = entry.status === 'Downloading' && entry.totalBytes
-        ? `${entry.status} · ${entry.percent}%`
-        : entry.status;
-      row.append(name, status);
-
-      if (['Downloading', 'Choose save location'].includes(entry.status) && entry.totalBytes > 0) {
-        const progress = document.createElement('progress');
-        progress.max = 100;
-        progress.value = entry.percent;
-        row.append(progress);
-      }
-      if (entry.scanDetail) {
-        const detail = document.createElement('p');
-        detail.className = entry.status === 'Flagged' ? 'download-warning' : 'download-detail';
-        detail.textContent = entry.scanDetail;
-        row.append(detail);
-      }
-
-      const actions = document.createElement('div');
-      actions.className = 'download-actions';
-      if (['Downloading', 'Choose save location'].includes(entry.status)) {
-        actions.append(actionButton('Cancel', () => send('download:cancel', { id: entry.id })));
-      } else if (entry.status === 'Complete') {
-        actions.append(actionButton('Open', () => send('download:open', { id: entry.id })));
-        actions.append(actionButton('Show in folder', () => send('download:show', { id: entry.id })));
-      }
-      row.append(actions);
-      list.append(row);
-    }
-  }
-
-  function actionButton(label, callback) {
-    const button = document.createElement('button');
-    button.className = 'download-action';
-    button.type = 'button';
-    button.textContent = label;
-    button.addEventListener('click', callback);
-    return button;
   }
 
   function renderTabs() {
@@ -299,17 +239,7 @@
   $('forward').addEventListener('click', () => send('nav', { action: 'forward' }));
   $('reload').addEventListener('click', () => send('nav', { action: state.loading ? 'stop' : 'reload' }));
   $('new-tab').addEventListener('click', () => send('tab:new'));
-  $('downloads-button').addEventListener('click', () => {
-    downloadsOpen = !downloadsOpen;
-    renderDownloads();
-  });
-  $('clear-downloads').addEventListener('click', () => send('download:clear'));
-  document.addEventListener('pointerdown', (event) => {
-    if (downloadsOpen && !event.target.closest('#downloads-panel, #downloads-button')) {
-      downloadsOpen = false;
-      renderDownloads();
-    }
-  });
+  $('downloads-button').addEventListener('click', () => send('open-downloads'));
   $('group-tab').addEventListener('click', () => send('group:new-active'));
   $('settings').addEventListener('click', () => send('open-settings'));
   $('extensions').addEventListener('click', (event) => {
